@@ -22,20 +22,13 @@ bool SerialEthernetInterface::begin() {
 
   ETHERNET_DEBUG_PRINTLN("Ethernet initializing");
 
-#ifdef PIN_ETHERNET_POWER_EN
-        ETHERNET_DEBUG_PRINTLN("Ethernet power enable");
-        pinMode(PIN_ETHERNET_POWER_EN, OUTPUT);
-        digitalWrite(PIN_ETHERNET_POWER_EN, HIGH); // Power up.
-        delay(100);
-        ETHERNET_DEBUG_PRINTLN("Ethernet power enabled");
-#endif
-
+  // WB_IO2 (power enable) is already driven HIGH by early constructor
+  // in RAK4631Board.cpp to support POE boot.
+  // Skip hardware reset — the W5100S comes out of power-on reset cleanly,
+  // and toggling reset kills the PHY link which breaks POE power.
 #ifdef PIN_ETHERNET_RESET
         pinMode(PIN_ETHERNET_RESET, OUTPUT);
-        digitalWrite(PIN_ETHERNET_RESET, LOW); // Reset Time.
-        delay(100);
-        digitalWrite(PIN_ETHERNET_RESET, HIGH); // Reset Time.
-        ETHERNET_DEBUG_PRINTLN("Ethernet reset pulse");
+        digitalWrite(PIN_ETHERNET_RESET, HIGH);
 #endif
 
   uint8_t mac[6];
