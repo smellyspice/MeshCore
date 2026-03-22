@@ -102,6 +102,8 @@ static bool ethernet_handle_command(const char* command, char* reply) {
 static void ethernet_check_client() {
   auto newClient = ethernet_server.available();
   if (newClient) {
+    // Only replace if this is actually a different client
+    if (newClient == ethernet_client && ethernet_client.connected()) return;
     if (ethernet_client) ethernet_client.stop();
     ethernet_client = newClient;
     IPAddress ip = ethernet_client.remoteIP();
