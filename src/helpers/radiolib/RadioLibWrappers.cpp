@@ -139,21 +139,11 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
 }
 
 uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
-  uint8_t sf = getSpreadingFactor();
-  if (sf != _preamble_sf) {
-    _preamble_sf = sf;
-    _radio->setPreambleLength(preambleLengthForSF(sf)); // sync preamble before airtime estimate
-  }
   return _radio->getTimeOnAir(len_bytes) / 1000;
 }
 
 bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
   _board->onBeforeTransmit();
-  uint8_t sf = getSpreadingFactor();
-  if (sf != _preamble_sf) {
-    _preamble_sf = sf;
-    _radio->setPreambleLength(preambleLengthForSF(sf)); // update preamble when SF has changed
-  }
   int err = _radio->startTransmit((uint8_t *) bytes, len);
   if (err == RADIOLIB_ERR_NONE) {
     state = STATE_TX_WAIT;
