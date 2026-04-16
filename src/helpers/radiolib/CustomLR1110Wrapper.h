@@ -24,6 +24,13 @@ public:
 
   float getLastRSSI() const override { return ((CustomLR1110 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomLR1110 *)_radio)->getSNR(); }
+
   uint8_t getSpreadingFactor() const override { return ((CustomLR1110 *)_radio)->getSpreadingFactor(); }
-  int16_t setRxBoostedGainMode(bool en) { return ((CustomLR1110 *)_radio)->setRxBoostedGainMode(en); };
+  
+  void setRxBoostedGainMode(bool en) override {
+    ((CustomLR1110 *)_radio)->setRxBoostedGainMode(en);
+  }
+  bool getRxBoostedGainMode() const override {
+    return ((CustomLR1110 *)_radio)->getRxBoostedGainMode();
+  }
 };

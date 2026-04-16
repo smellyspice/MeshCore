@@ -151,3 +151,4 @@ bool ThinkNodeM1SensorManager::setSettingValue(const char* name, const char* val
   }
   return false;  // not supported
 }
+
