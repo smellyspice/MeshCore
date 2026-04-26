@@ -12,7 +12,6 @@ static uint32_t _atoi(const char* sp) {
   return n;
 }
 
-
 #if defined(NRF52_PLATFORM) || defined(STM32_PLATFORM)
   #include <InternalFileSystem.h>
   #if defined(QSPIFLASH)
@@ -83,13 +82,8 @@ static uint32_t _atoi(const char* sp) {
     ArduinoSerialInterface serial_interface;
   #endif
 #elif defined(STM32_PLATFORM)
-  #ifdef ETHERNET_ENABLED
-    #include <helpers/nrf52/SerialEthernetInterface.h>
-    SerialEthernetInterface serial_interface;
-  #else
-    #include <helpers/ArduinoSerialInterface.h>
-    ArduinoSerialInterface serial_interface;
-  #endif
+  #include <helpers/ArduinoSerialInterface.h>
+  ArduinoSerialInterface serial_interface;
 #else
   #error "need to define a serial interface"
 #endif
