@@ -318,19 +318,17 @@ Remaining bytes:                Binary payload (variable length)
 
 #### Registered `data_type` values
 
-Declared in `src/helpers/TxtDataHelpers.h`. These values have agreed-upon payload schemas so different client apps on the same channel can interoperate.
+`data_type` is an **application identifier**, not a payload-format identifier. Each registered value identifies an application that owns its own internal payload schemas. The firmware does not inspect payload contents — `data_type` is transported opaquely.
 
-| Value  | Constant             | Purpose                                     | Payload schema                                                                                         |
-|--------|----------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------|
-| 0x0000 | `DATA_TYPE_RESERVED` | Reserved; invalid on send                    | —                                                                                                      |
-| 0x0001 | `DATA_TYPE_SMAZ_TEXT`| Raw SMAZ-compressed UTF-8 text               | `[sender_name_len: u8][sender_name: UTF-8 × sender_name_len][smaz_bytes: remaining]`                   |
-| 0x0002 | `DATA_TYPE_GIPHY_GIF`| Giphy GIF id (avoids base64 tax)             | `[sender_name_len: u8][sender_name: UTF-8 × sender_name_len][giphy_id: ASCII, remaining]`              |
-| 0x0003 | `DATA_TYPE_REACTION` | Emoji reaction targeting a prior message     | `[target_hash: 2 bytes LE][emoji_index: u8][sender_name_len: u8][sender_name: UTF-8 × sender_name_len]` |
-| 0xFFFF | `DATA_TYPE_DEV`      | Developer/experimental namespace             | Application-defined                                                                                     |
+| Value           | Constant             | Purpose                                                                  |
+|-----------------|----------------------|--------------------------------------------------------------------------|
+| 0x0000          | `DATA_TYPE_RESERVED` | Reserved; invalid on send                                                |
+| 0x0001 – 0x00FF | —                    | Reserved for internal use                                                |
+| 0x0100 – 0xFEFF | —                    | Registered application namespaces (see [number_allocations.md](number_allocations.md)) |
+| 0xFF00 – 0xFFFE | —                    | Testing/development; no registration required                            |
+| 0xFFFF          | `DATA_TYPE_DEV`      | Developer/experimental namespace                                         |
 
-The firmware does not inspect the payload contents — `data_type` is transported opaquely, and the schemas above are a client-side contract between cooperating apps.
-
-To request a new registered value, submit a PR adding a `#define` to `TxtDataHelpers.h` and a row to this table.
+To register a new application, submit a PR adding a row to the table in [docs/number_allocations.md](number_allocations.md). Internal sub-formats within an allocated application ID are owned by that application and are not tracked in MeshCore firmware or this document.
 
 ---
 
