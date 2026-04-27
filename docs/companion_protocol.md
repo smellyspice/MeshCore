@@ -340,13 +340,24 @@ Inbound group datagrams (radio-level `PAYLOAD_TYPE_GRP_DATA`, 0x06) are forwarde
 ```
 Byte 0:                 0x1B (packet type)
 Byte 1:                 SNR (signed int8, scaled ×4 — divide by 4.0 to recover dB)
-Bytes 2-3:              Reserved
+Bytes 2-3:              Reserved (clients MUST ignore)
 Byte 4:                 Channel Index (0-7)
-Byte 5:                 Path Length (actual path when flooded, otherwise 0xFF)
+Byte 5:                 Path Length (actual path length when flooded, otherwise 0xFF for direct)
 Bytes 6-7:              Data Type (uint16 little-endian)
 Byte 8:                 Data Length
 Bytes 9 .. 8+data_len:  Payload
 ```
+
+**Path bytes are not forwarded**: Only `path_len` is reported in the receive frame — the path itself is not copied to the host. There are no path bytes between byte 5 and the data_type field at bytes 6–7, regardless of `path_len`.
+
+**Path Length semantics differ between send and receive**:
+
+| Direction | `path_len = 0xFF`               | `path_len ≠ 0xFF`                                                                   |
+|-----------|---------------------------------|-------------------------------------------------------------------------------------|
+| Send      | Flood the network               | Direct route; the encoded path follows (low 6 bits = hash count, top 2 bits + 1 = hash size; on-wire byte count = `hash_count × hash_size`) |
+| Receive   | Packet arrived via direct route | Packet was flooded; this is the encoded `pkt->path_len` field as observed (no path bytes follow) |
+
+In other words, the meaning of `0xFF` is inverted between the two directions, and on receive the field carries metadata only — never a routable path. `path_len` is an encoded byte (see `Packet::isValidPathLen` / `Packet::writePath` in `src/Packet.cpp`), not a raw byte count.
 
 **Note**: The device may also emit `PACKET_MESSAGES_WAITING` (0x83) to notify the host that datagrams are queued; poll with `CMD_SYNC_NEXT_MESSAGE` (0x0A) to retrieve them.
 
