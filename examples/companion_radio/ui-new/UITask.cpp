@@ -146,7 +146,7 @@ class HomeScreen : public UIScreen {
   bool sensors_scroll = false;
   int sensors_scroll_offset = 0;
   int next_sensors_refresh = 0;
-  
+
   void refresh_sensors() {
     if (millis() > next_sensors_refresh) {
       sensors_lpp.reset();
@@ -170,7 +170,7 @@ class HomeScreen : public UIScreen {
 
 public:
   HomeScreen(UITask* task, mesh::RTCClock* rtc, SensorManager* sensors, NodePrefs* node_prefs)
-     : _task(task), _rtc(rtc), _sensors(sensors), _node_prefs(node_prefs), _page(0), 
+     : _task(task), _rtc(rtc), _sensors(sensors), _node_prefs(node_prefs), _page(0),
        _shutdown_init(false), sensors_lpp(200) {  }
 
   void poll() override {
@@ -213,7 +213,7 @@ public:
         IPAddress ip = WiFi.localIP();
         snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         display.setTextSize(1);
-        display.drawTextCentered(display.width() / 2, 54, tmp); 
+        display.drawTextCentered(display.width() / 2, 54, tmp);
       #endif
       if (_task->hasConnection()) {
         display.setColor(DisplayDriver::GREEN);
@@ -241,10 +241,10 @@ public:
         } else {
           sprintf(tmp, "%dh", secs / (60*60));
         }
-        
+
         int timestamp_width = display.getTextWidth(tmp);
         int max_name_width = display.width() - timestamp_width - 1;
-        
+
         char filtered_recent_name[sizeof(a->name)];
         display.translateUTF8ToBlocks(filtered_recent_name, a->name, sizeof(filtered_recent_name));
         display.drawTextEllipsized(0, y, max_name_width, filtered_recent_name);
@@ -310,7 +310,7 @@ public:
         display.drawTextRightAlign(display.width()-1, y, buf);
         y = y + 12;
         display.drawTextLeftAlign(0, y, "pos");
-        sprintf(buf, "%.4f %.4f", 
+        sprintf(buf, "%.4f %.4f",
           nmea->getLatitude()/1000000., nmea->getLongitude()/1000000.);
         display.drawTextRightAlign(display.width()-1, y, buf);
         y = y + 12;
@@ -741,7 +741,7 @@ void UITask::loop() {
 #endif
 #if defined(PIN_USER_BTN_ANA)
   if (abs(millis() - _analogue_pin_read_millis) > 10) {
-    ev = analog_btn.check();
+    int ev = analog_btn.check();
     if (ev == BUTTON_EVENT_CLICK) {
       c = checkDisplayOn(KEY_NEXT);
     } else if (ev == BUTTON_EVENT_LONG_PRESS) {
@@ -878,7 +878,7 @@ bool UITask::getGPSState() {
         return !strcmp(_sensors->getSettingValue(i), "1");
       }
     }
-  } 
+  }
   return false;
 }
 
