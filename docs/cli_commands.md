@@ -762,35 +762,36 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 **Parameters (tokens):** Space-separated. A logical **cursor** starts at the wildcard `*`.
 
-- **`name`** — Create `name` as a child of the current cursor (same as `region put name` with that parent). Cursor moves to `name`.
-- **`name|jump`** or **`name,jump`** — Create `name` as a child of the current cursor, then move the cursor to `jump` (must already exist: created earlier in this command or already on the node). `jump` is **not** the parent of `name`; use this to pop back up and start another branch.
+- **`name`** — Create `name` as a child of the current cursor (equivalent to `region put name` with the cursor as parent). Cursor moves to `name`.
+- **`name|jump`** *(or `name,jump`)* — Create `name` as a child of the current cursor, then move the cursor to `jump` (must already exist on the node, or have been created earlier in this command). `jump` is **not** the parent of `name`; use this form to pop back up and start another branch.
 
-**Note:** Same flood defaults as `region put` (flood allowed on each created region).
+**Behavior:** Each created region defaults to flood-allowed (same as `region put`). The reply is the resulting region tree (same format as bare `region`); review it before running `region save` to persist. On error, the reply is `Err - ...` and any regions placed before the failure remain on the node, just like a partial chain of `region put`.
 
-**Note:** Does **not** persist to flash. The reply is the region tree (same format as bare `region`) so you can review before **`region save`**.
+**Existing regions:** `region def` does not clear the existing tree — if a name already exists, its parent is updated to the current cursor; otherwise a new region is created. To start from scratch, `region remove` the unwanted regions first.
 
-**Note:** On error, the reply is a short `Err - ...` message; regions placed before the failure remain (same as a partial chain of `region put`).
+**Limits:** Repeater serial accepts one line up to **160 characters**. For larger trees, split across multiple `region def` commands; the cursor resets to `*` between commands, so lead the next command with `child|ancestor` to reposition. Each token splits at most once on `|` — `region def a|b|c|d` is not a flat-list shorthand; see the flat-list example below.
 
-**Note:** Repeater serial accepts one line up to **160 characters** total; split very large trees across multiple `region def` commands.
-
-**Note:** `|` only splits once per token. `region def a|b|c|d` is **not** a flat-list shorthand — use `region def a|* b|* c|* d|*` for multiple children of `*`.
-
-**Example — linear chain:**
+**Example — linear chain** (each token becomes a child of the previous):
 ```
-region def west pnw wa w-wa sea
+region def a b c d e
 region save
 ```
 
-**Example — branched tree** (equivalent to `region put west` … `region put sw-wa wa`):
+**Example — branched tree** (equivalent to `region put a`, `region put b a`, `region put c b`, `region put d c`, `region put e b`, `region put f e`):
 ```
-region def west pnw or pdx|pnw wa sw-wa
+region def a b c d|b e f
 region save
 ```
-Same with comma as jump delimiter: `region def west pnw or pdx,pnw wa sw-wa`
 
-**Example — flat list** (each region child of `*`):
+**Example — error and partial state:**
 ```
-region def west|* pnw|* or|* pdx|* wa|* sw-wa
+region def a b c|nope d
+```
+The reply is `Err - unknown jump: nope`. `a`, `b`, and `c` were placed before the failure; `d` was not. Run `region` to inspect, then re-run with a corrected jump or repair with `region remove` / `region put`.
+
+**Example — flat list** (each region a child of `*`). Use `|*` after each token to pop the cursor back to the root before the next token:
+```
+region def a|* b|* c|* d|* e|* f
 region save
 ```
 
