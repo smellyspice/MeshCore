@@ -104,7 +104,7 @@ void setup() {
   the_mesh.sendSelfAdvertisement(16000, false);
 #endif
 
-  board.bootComplete();
+  board.onBootComplete();
 }
 
 void loop() {

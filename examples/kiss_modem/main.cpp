@@ -120,7 +120,7 @@ void setup() {
   modem->setGetStatsCallback(onGetStats);
   modem->begin();
 
-  board.bootComplete();
+  board.onBootComplete();
 }
 
 void loop() {

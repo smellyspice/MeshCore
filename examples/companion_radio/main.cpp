@@ -239,7 +239,7 @@ void setup() {
   ui_task.begin(disp, &sensors, the_mesh.getNodePrefs());  // still want to pass this in as dependency, as prefs might be moved
 #endif
 
-  board.bootComplete();
+  board.onBootComplete();
 }
 
 void loop() {
