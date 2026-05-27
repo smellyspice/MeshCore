@@ -12,13 +12,26 @@
 // Sensor library includes and static driver instances
 // ============================================================
 
-#ifdef ENV_INCLUDE_BME680
+#if ENV_INCLUDE_BME680_BSEC
 #ifndef TELEM_BME680_ADDRESS
 #define TELEM_BME680_ADDRESS 0x76
 #endif
 #define TELEM_BME680_SEALEVELPRESSURE_HPA (1013.25)
-#include <Adafruit_BME680.h>
-static Adafruit_BME680 BME680(TELEM_WIRE);
+#include <bsec.h>
+#include <Adafruit_LittleFS.h>
+#include <InternalFileSystem.h>
+static const uint8_t bsec_config_iaq[] = {
+#include "config/generic_33v_3s_28d/bsec_iaq.txt"
+};
+static Bsec    bsec_iaq;
+static float   bsec_temperature  = 0;
+static float   bsec_humidity     = 0;
+static float   bsec_pressure_hpa = 0;
+static float   bsec_iaq_val      = 0;
+static uint8_t bsec_accuracy     = 0;
+static bool    bsec_active       = false;
+static bool    bsec_data_ready   = false;
+#define BSEC_STATE_FILE "/bsec_state.bin"
 #endif
 
 #ifdef ENV_INCLUDE_BMP085
@@ -217,9 +230,10 @@ static void query_bme680(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   if (BME680.performReading()) {
     lpp.addTemperature(ch, BME680.temperature);
     lpp.addRelativeHumidity(ch, BME680.humidity);
-    lpp.addBarometricPressure(ch, BME680.pressure / 100);
-    lpp.addAltitude(ch, 44330.0 * (1.0 - pow((BME680.pressure / 100) / TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903)));
-    lpp.addAnalogInput(ch, BME680.gas_resistance);
+    const float pressure_hpa = BME680.pressure / 100.0f;
+    lpp.addBarometricPressure(ch, pressure_hpa);
+    lpp.addAltitude(ch, 44330.0f * (1.0f - powf(pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+    lpp.addGenericSensor(ch, BME680.gas_resistance);
   }
 }
 #endif
@@ -431,6 +445,63 @@ static void query_rak12035(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
 }
 #endif
 
+#if ENV_INCLUDE_BME680_BSEC
+static void bsec_load_state() {
+  using namespace Adafruit_LittleFS_Namespace;
+  File f = InternalFS.open(BSEC_STATE_FILE, FILE_O_READ);
+  if (!f) return;
+  uint8_t state[BSEC_MAX_STATE_BLOB_SIZE];
+  f.read(state, BSEC_MAX_STATE_BLOB_SIZE);
+  f.close();
+  bsec_iaq.setState(state);
+}
+
+static void bsec_save_state() {
+  using namespace Adafruit_LittleFS_Namespace;
+  uint8_t state[BSEC_MAX_STATE_BLOB_SIZE];
+  bsec_iaq.getState(state);
+  InternalFS.remove(BSEC_STATE_FILE);
+  File f = InternalFS.open(BSEC_STATE_FILE, FILE_O_WRITE);
+  if (!f) return;
+  f.write(state, BSEC_MAX_STATE_BLOB_SIZE);
+  f.close();
+}
+
+static uint8_t init_bme680_bsec(TwoWire* wire, uint8_t addr) {
+  bsec_iaq.begin(addr, *wire);
+  if (bsec_iaq.bsecStatus != BSEC_OK) return 0;
+
+  bsec_iaq.setConfig(bsec_config_iaq);
+  if (bsec_iaq.bsecStatus != BSEC_OK) return 0;
+
+  bsec_virtual_sensor_t outputs[] = {
+    BSEC_OUTPUT_IAQ,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY,
+    BSEC_OUTPUT_RAW_PRESSURE,
+    BSEC_OUTPUT_STABILIZATION_STATUS,
+    BSEC_OUTPUT_RUN_IN_STATUS,
+  };
+  bsec_iaq.updateSubscription(outputs, 6, BSEC_SAMPLE_RATE_LP);
+  if (bsec_iaq.bsecStatus != BSEC_OK) return 0;
+
+  bsec_load_state();
+  bsec_active = true;
+  return 1;
+}
+
+static void query_bme680_bsec(uint8_t ch, uint8_t, CayenneLPP& lpp) {
+  if (!bsec_data_ready) return;
+  bsec_data_ready = false;
+  lpp.addTemperature(ch, bsec_temperature);
+  lpp.addRelativeHumidity(ch, bsec_humidity);
+  lpp.addBarometricPressure(ch, bsec_pressure_hpa);
+  lpp.addAltitude(ch, 44330.0f * (1.0f - powf(bsec_pressure_hpa / (float)TELEM_BME680_SEALEVELPRESSURE_HPA, 0.1903f)));
+  lpp.addGenericSensor(ch, (uint16_t)bsec_iaq_val);
+  lpp.addAnalogInput(ch, (float)bsec_accuracy);
+}
+#endif
+
 // ============================================================
 // Sensor descriptor table
 //
@@ -457,6 +528,9 @@ static const SensorDef SENSOR_TABLE[] = {
 #endif
 #ifdef ENV_INCLUDE_BME680
   { TELEM_BME680_ADDRESS,  "BME680",       init_bme680,   query_bme680   },
+#endif
+#if ENV_INCLUDE_BME680_BSEC
+  { TELEM_BME680_ADDRESS,  "BME680+BSEC",   init_bme680_bsec, query_bme680_bsec },
 #endif
 #if ENV_INCLUDE_BME280
   { TELEM_BME280_ADDRESS,  "BME280",       init_bme280,   query_bme280   },
@@ -780,11 +854,13 @@ void EnvironmentSensorManager::stop_gps() {
   MESH_DEBUG_PRINTLN("Stop GPS is N/A on this board. Actual GPS state unchanged");
   #endif
 }
+#endif // ENV_INCLUDE_GPS
 
+#if ENV_INCLUDE_GPS || defined(ENV_INCLUDE_BME680_BSEC)
 void EnvironmentSensorManager::loop() {
-  static long next_gps_update = 0;
 
   #if ENV_INCLUDE_GPS
+  static long next_gps_update = 0;
   if (gps_active) {
     _location->loop();
   }
@@ -812,5 +888,18 @@ void EnvironmentSensorManager::loop() {
     next_gps_update = millis() + (gps_update_interval_sec * 1000);
   }
   #endif
+  #if ENV_INCLUDE_BME680_BSEC
+  if (bsec_active && bsec_iaq.run()) {
+    uint8_t prev_accuracy = bsec_accuracy;
+    bsec_temperature  = bsec_iaq.temperature;
+    bsec_humidity     = bsec_iaq.humidity;
+    bsec_pressure_hpa = bsec_iaq.pressure / 100.0f;
+    bsec_iaq_val      = bsec_iaq.iaq;
+    bsec_accuracy     = bsec_iaq.iaqAccuracy;
+    bsec_data_ready   = true;
+    if (bsec_accuracy >= 2 && bsec_accuracy > prev_accuracy)
+      bsec_save_state();
+  }
+  #endif
 }
-#endif
+#endif // ENV_INCLUDE_GPS || ENV_INCLUDE_BME680_BSEC
