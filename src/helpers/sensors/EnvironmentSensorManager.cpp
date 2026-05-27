@@ -34,6 +34,15 @@ static bool    bsec_data_ready   = false;
 #define BSEC_STATE_FILE "/bsec_state.bin"
 #endif
 
+#ifdef ENV_INCLUDE_BME680
+#ifndef TELEM_BME680_ADDRESS
+#define TELEM_BME680_ADDRESS 0x76
+#endif
+#define TELEM_BME680_SEALEVELPRESSURE_HPA (1013.25)
+#include <Adafruit_BME680.h>
+static Adafruit_BME680 BME680(TELEM_WIRE);
+#endif
+
 #ifdef ENV_INCLUDE_BMP085
 #define TELEM_BMP085_SEALEVELPRESSURE_HPA (1013.25)
 #include <Adafruit_BMP085.h>
