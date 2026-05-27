@@ -70,11 +70,11 @@ uint16_t HeltecV4R8Board::getBattMilliVolts() {
 
   uint32_t raw = 0;
   for (int i = 0; i < 8; i++) {
-    raw += analogRead(PIN_VBAT_READ);
+    raw += analogReadMilliVolts(PIN_VBAT_READ);
   }
   raw = raw / 8;
 
-  return (adc_mult * (3.3f / 4096.0f) * raw) * 1000;
+  return (adc_mult * raw);
 }
 
 const char* HeltecV4R8Board::getManufacturerName() const {
