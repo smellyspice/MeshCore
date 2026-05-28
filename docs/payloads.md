@@ -59,7 +59,7 @@ Appdata Flags
 
 # Acknowledgement
 
-An acknowledgement that a message was received. Note that for returned path messages, an acknowledgement can be sent in the "extra" payload (see [Returned Path](#returned-path)) instead of as a separate ackowledgement packet. CLI commands do not cause acknowledgement responses, neither discrete nor extra.
+An acknowledgement that a message was received. Note that for returned path messages, an acknowledgement can be sent in the "extra" payload (see [Returned Path](#returned-path)) instead of as a separate acknowledgement packet. CLI commands do not cause acknowledgement responses, neither discrete nor extra.
 
 | Field    | Size (bytes) | Description                                                |
 |----------|--------------|------------------------------------------------------------|
@@ -141,7 +141,7 @@ Not defined in `BaseChatMesh`.
 
 Not defined in `BaseChatMesh`.
 
-### Get Neighors
+### Get Neighbors
 
 Not defined in `BaseChatMesh`.
 

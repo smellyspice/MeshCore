@@ -81,7 +81,7 @@ A list of frequently-asked questions and answers for MeshCore
     - [7.3. Q: Is there a way to lower the chance of a failed OTA device firmware update (DFU)?](#73-q-is-there-a-way-to-lower-the-chance-of-a-failed-ota-device-firmware-update-dfu)
     - [7.4. Q: are the MeshCore logo and font available?](#74-q-are-the-meshcore-logo-and-font-available)
     - [7.5. Q: What is the format of a contact or channel QR code?](#75-q-what-is-the-format-of-a-contact-or-channel-qr-code)
-    - [7.6. Q: How do I connect to the companion via WIFI, e.g. using a heltec v3?](#76-q-how-do-i-connect-to-the-companion-via-wifi-eg-using-a-heltec-v3)
+    - [7.6. Q: How do I connect to the companion via Wi-Fi, e.g. using a heltec v3?](#76-q-how-do-i-connect-to-the-companion-via-wi-fi-eg-using-a-heltec-v3)
     - [7.7. Q: I have a Station G2, or a Heltec V4, or an Ikoka Stick, or a radio with a EByte E22-900M30S or a E22-900M33S module, what should their transmit power be set to?](#77-q-i-have-a-station-g2-or-a-heltec-v4-or-an-ikoka-stick-or-a-radio-with-a-ebyte-e22-900m30s-or-a-e22-900m33s-module-what-should-their-transmit-power-be-set-to)
 
 ## 1. Introduction
@@ -274,7 +274,7 @@ Reboot the repeater after `set prv.key <hex>` command for the new private key to
 
 ### 3.6. Q: The first byte of my repeater's public key collides with an existing repeater on the mesh.  How do I get a new private key with a matching public key that has its first byte of my choosing?
 
-**A:** You can generate a new private key and specific the first byte of its public key here:  https://gessaman.com/mc-keygen/
+**A:** You can generate a new private key and specify the first byte of its public key here:  https://gessaman.com/mc-keygen/
 
 Having multiple repeaters with the same first byte ID does not negatively affect the mesh or its functionality. Flood and pathed packets will still reach their destinations. First byte ID collision makes traceroute and path analysis harder because these tools don't know exactly which of the two (or more) colliding repeaters is the one in the path.
 
@@ -301,7 +301,7 @@ This is a very low cost operation.  AGC reset is done by simply setting `state =
 **A:**
 The original MeshCore protocol design uses the first byte of a repeater's public key to denote the repeater in a path.  And with 1 byte for each repeater in the path, MeshCore packets can travel as many as 64 hops.  
 
-However, with 1 byte, there are only 254 unique IDs (exclude 00 and FF which are reserved).  Many meshes group have multiple repeaters with the same first byte in their public keys. Packets continue to pass through repeaters and the mesh is not harmed in anyway.  It does make it harder for tools to analyze paths with duplicated repeater IDs.  
+However, with 1 byte, there are only 254 unique IDs (exclude 00 and FF which are reserved).  Many meshes group have multiple repeaters with the same first byte in their public keys. Packets continue to pass through repeaters and the mesh is not harmed in any way.  It does make it harder for tools to analyze paths with duplicated repeater IDs.  
 
 Firmware version 1.14 and newer introduces the ability for repeaters to advert with 1-, 2-, or 3-byte adverts.  Companions can also send out channel and direct messages with 1-, 2-, or 3-byte path.  Adverts and messages sent in 1-byte path is compatible with repeater firmware older or newer than 1.14.  They will travel up to 64 hops.  2-byte adverts and messages will travel up to 32 hops.  3-byte adverts and messages will travel up to 21 hops.
 
@@ -416,7 +416,7 @@ Unlock page: <https://buymeacoffee.com/ripplebiz/e/249834>
 
 ### 4.10. Q: How to decipher the diagnostics screen on T-Deck?
 
-**A: ** Space is tight on T-Deck's screen, so the information is a bit cryptic.  The format is :
+**A:** Space is tight on T-Deck's screen, so the information is a bit cryptic.  The format is :
 `{hops} l:{packet-length}({payload-len}) t:{packet-type} snr:{n} rssi:{n}`
 
 See here for packet-type:
@@ -467,7 +467,7 @@ https://github.com/meshcore-dev/MeshCore/blob/main/src/Packet.h#L19
 
 **CR is coding rate** - from: https://www.thethingsnetwork.org/docs/lorawan/fec-and-code-rate/
 
-TL;DR: default CR to 5 for good stable links.  If it is not a solid link and is intermittent, change to CR to 7 or 8.
+TL;DR: default CR to 5 for good stable links.  If it is not a solid link and is intermittent, change CR to 7 or 8.
 
 Forward Error Correction is a process of adding redundant bits to the data to be transmitted. During the transmission, data may get corrupted by interference (changes from 0 to 1 / 1 to 0). These error correction bits are used at the receivers for restoring corrupted bits.
 
@@ -490,7 +490,7 @@ So, it's balancing act between speed of the transmission and resistance to noise
 things network is mainly focused on LoRaWAN, but the LoRa low-level stuff still checks out for any LoRa project
 
 ### 5.2. Q: Do MeshCore clients repeat?
-**A:** No, MeshCore clients do not repeat.  This is the core of MeshCore's messaging-first design.  This is to avoid devices flooding the air ware and create endless collisions, so messages sent aren't received.
+**A:** No, MeshCore clients do not repeat.  This is the core of MeshCore's messaging-first design.  This is to avoid devices flooding the airwaves and create endless collisions, so messages sent aren't received.
 In MeshCore, only repeaters and room server with `set repeat on` repeat.
 
 ### 5.3. Q: What happens when a node learns a route via a mobile repeater, and that repeater is gone?
@@ -577,7 +577,7 @@ Javascript: https://github.com/liamcottle/meshcore.js
 ### 5.11. Q: Does MeshCore support ATAK
 **A:** ATAK is not currently on MeshCore's roadmap.
 
-Meshcore would not be best suited to ATAK because MeshCore:
+MeshCore would not be best suited to ATAK because MeshCore:
 clients do not repeat and therefore you would need a network of repeaters in place
 will not have a stable path where all clients are constantly moving between repeaters
 
@@ -597,14 +597,14 @@ You can use the same companion (same public key) that you used to add your repea
 
 
 ### 5.13. Q: Can I use a Raspberry Pi to update a MeshCore radio?
-** A:** Yes.
+**A:** Yes.
 Below are the instructions to flash firmware onto a supported LoRa device using a Raspberry Pi over USB serial.
 
 > Instructions for nRF devices like RAK, T1000-E, T114 are immediately after the ESP instructions
 
 For ESP-based devices (e.g. Heltec V3) you need:
 - Download firmware file from https://flasher.meshcore.io
-    - Go to the web site on a browser, find the section that has the firmware up need
+    - Go to the web site on a browser, find the section that has the firmware you need
     - Click the Download button, right click on the file you need, for example,
         - `Heltec_V3_companion_radio_ble-v1.7.1-165fb33.bin`
             - Non-merged bin keeps the existing Bluetooth pairing database
@@ -632,7 +632,7 @@ For ESP-based devices (e.g. Heltec V3) you need:
 
 For nRF devices (e.g. RAK, Heltec T114) you need the following:
 - Download firmware file from https://flasher.meshcore.io
-    - Go to the web site on a browser, find the section that has the firmware up need
+    - Go to the web site on a browser, find the section that has the firmware you need
     - You need the ZIP version for the adafruit flash tool (below)
     - Click the Download button, right click on the ZIP file, for example:
         - `RAK_4631_companion_radio_ble-v1.7.1-165fb33.zip`
@@ -755,11 +755,11 @@ Allow the browser user on it:
 10. Select the device you want to update. If the device you want to update is not on the list, try enabling`OTA` on the device again
 11. If the device is not found, enable `Force Scanning` in the DFU app
 12. Tab the `Upload` to begin OTA update
-13. If it fails, try turning off and on Bluetooth on your phone.  If that doesn't work, try rebooting your phone.  If you keep getting failures at the "Enabling Bootloader" step, try forgetting the NRF board in your IOS or Andriod device's bluetooth settings and re-pair it through the DFU app.
+13. If it fails, try turning off and on Bluetooth on your phone.  If that doesn't work, try rebooting your phone.  If you keep getting failures at the "Enabling Bootloader" step, try forgetting the NRF board in your iOS or Android device's bluetooth settings and re-pair it through the DFU app.
 14. Wait for the update to complete.  It can take a few minutes.   
 15. It is strongly recommended that you install and use the OTAFIX bootloader at https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX. 
 16. To update a companion node over OTA, it must be running companion firmware v1.15 or greater.   
-17. Please see the Meshcore Blog for additional information on OTA firmware flashing: 
+17. Please see the MeshCore Blog for additional information on OTA firmware flashing: 
     - https://blog.meshcore.io/2026/04/06/otafix-bootloader
     - https://blog.meshcore.io/2026/04/02/nrf-ota-update
 
@@ -778,7 +778,7 @@ After this bootloader is flashed onto the device, you can trigger over the air u
 2. From the MeshCore app, login remotely to the repeater you want to update with admin privilege
 4. Go to the Command Line tab, type `start ota` and hit enter.
 5. you should see `OK` to confirm the repeater device is now in OTA mode
-6. The command `start ota` on an ESP32-based device starts a wifi hotspot named `MeshCore OTA`
+6. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`
 7. From your phone or computer connect to the 'MeshCore OTA' hotspot
 8. From a browser, go to http://192.168.4.1/update and upload the non-merged bin from the flasher
 
@@ -819,9 +819,9 @@ where `&type` is:
 `room = 3`
 `sensor = 4`
 
-### 7.6. Q: How do I connect to the companion via WIFI, e.g. using a heltec v3?
+### 7.6. Q: How do I connect to the companion via Wi-Fi, e.g. using a heltec v3?
  **A:**
-WiFi firmware requires you to compile it yourself, as you need to set the wifi ssid and password.
+Wi-Fi firmware requires you to compile it yourself, as you need to set the wifi ssid and password.
 Edit WIFI_SSID and WIFI_PWD in `./variants/heltec_v3/platformio.ini` and then flash it to your device.
 
 ### 7.7. Q: I have a Station G2, or a Heltec V4, or an Ikoka Stick, or a radio with a EByte E22-900M30S or a E22-900M33S module, what should their transmit power be set to?

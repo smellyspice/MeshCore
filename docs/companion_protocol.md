@@ -955,7 +955,7 @@ def on_notification_received(data):
 
 3. **Message Handling**:
    - Send `CMD_SYNC_NEXT_MESSAGE` when `PUSH_CODE_MSG_WAITING` is received
-   - Implement message deduplication to avoid display the same message twice
+   - Implement message deduplication to avoid displaying the same message twice
 
 4. **Channel Management**:
     - Fetch all channel slots even if you encounter an empty slot
