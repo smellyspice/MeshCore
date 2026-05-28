@@ -717,15 +717,15 @@ You can get the epoch time on <https://www.epochconverter.com/> and use it to se
     - For T1000-e, quickly disconnect and reconnect the magnetic side of the cable from the device **TWICE**
     - For Heltec T114, click the reset button **TWICE** (the bottom button)
     - For Xiao nRF52, click the reset button once.  If that doesn't work, quickly double click the reset button twice.  If that doesn't work, disconnect the board from your PC and reconnect again ([seeed studio wiki](https://wiki.seeedstudio.com/XIAO_BLE/#access-the-swd-pins-for-debugging-and-reflashing-bootloader))
-5. A new folder will appear on your computer's desktop
-6. Download the `flash_erase*.uf2` file for your device on https://flasher.meshcore.io
+2. A new folder will appear on your computer's desktop
+3. Download the `flash_erase*.uf2` file for your device on https://flasher.meshcore.io
     - RAK WisBlock and Heltec T114: `Flash_erase-nRF32_softdevice_v6.uf2`
     - Seeed Studio Xiao nRF52 WIO: `Flash_erase-nRF52_softdevice_v7.uf2`
-8. drag and drop the uf2 file for your device to the root of the new folder
-9. Wait for the copy to complete.  You might get an error dialog, you can ignore it
-10. Go to https://flasher.meshcore.io, click `Console` and select the serial port for your connected device
-11. In the console, press enter.  Your flash should now be erased
-12. You may now flash the latest MeshCore firmware onto your device
+4. drag and drop the uf2 file for your device to the root of the new folder
+5. Wait for the copy to complete.  You might get an error dialog, you can ignore it
+6. Go to https://flasher.meshcore.io, click `Console` and select the serial port for your connected device
+7. In the console, press enter.  Your flash should now be erased
+8. You may now flash the latest MeshCore firmware onto your device
 
 Separately, starting in firmware version 1.7.0, there is a CLI Rescue mode.  If your device has a user button (e.g. some RAK, T114), you can activate the rescue mode by hold down the user button of the device within 8 seconds of boot.  Then you can use the 'Console' on https://flasher.meshcore.io
 
@@ -751,15 +751,15 @@ Allow the browser user on it:
 5. you should see `OK` to confirm the repeater device is now in OTA mode
 6. Run the DFU app,tab `Settings` on the top right corner
 7. Enable `Packets receipt notifications`, and change `Number of Packets` to 10 for RAK, 8 for T114.  8 also works for RAK.
-9. Select the firmware zip file you downloaded
-10. Select the device you want to update. If the device you want to update is not on the list, try enabling`OTA` on the device again
-11. If the device is not found, enable `Force Scanning` in the DFU app
-12. Tab the `Upload` to begin OTA update
-13. If it fails, try turning off and on Bluetooth on your phone.  If that doesn't work, try rebooting your phone.  If you keep getting failures at the "Enabling Bootloader" step, try forgetting the NRF board in your iOS or Android device's bluetooth settings and re-pair it through the DFU app.
-14. Wait for the update to complete.  It can take a few minutes.   
-15. It is strongly recommended that you install and use the OTAFIX bootloader at https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX. 
-16. To update a companion node over OTA, it must be running companion firmware v1.15 or greater.   
-17. Please see the MeshCore Blog for additional information on OTA firmware flashing: 
+8. Select the firmware zip file you downloaded
+9. Select the device you want to update. If the device you want to update is not on the list, try enabling`OTA` on the device again
+10. If the device is not found, enable `Force Scanning` in the DFU app
+11. Tab the `Upload` to begin OTA update
+12. If it fails, try turning off and on Bluetooth on your phone.  If that doesn't work, try rebooting your phone.  If you keep getting failures at the "Enabling Bootloader" step, try forgetting the NRF board in your iOS or Android device's bluetooth settings and re-pair it through the DFU app.
+13. Wait for the update to complete.  It can take a few minutes.   
+14. It is strongly recommended that you install and use the OTAFIX bootloader at https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX. 
+15. To update a companion node over OTA, it must be running companion firmware v1.15 or greater.   
+16. Please see the MeshCore Blog for additional information on OTA firmware flashing: 
     - https://blog.meshcore.io/2026/04/06/otafix-bootloader
     - https://blog.meshcore.io/2026/04/02/nrf-ota-update
 
@@ -776,11 +776,11 @@ After this bootloader is flashed onto the device, you can trigger over the air u
 **A:** For ESP32-based devices (e.g. Heltec V3):
 1. On https://flasher.meshcore.io, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name)
 2. From the MeshCore app, login remotely to the repeater you want to update with admin privilege
-4. Go to the Command Line tab, type `start ota` and hit enter.
-5. you should see `OK` to confirm the repeater device is now in OTA mode
-6. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`
-7. From your phone or computer connect to the 'MeshCore OTA' hotspot
-8. From a browser, go to http://192.168.4.1/update and upload the non-merged bin from the flasher
+3. Go to the Command Line tab, type `start ota` and hit enter.
+4. you should see `OK` to confirm the repeater device is now in OTA mode
+5. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`
+6. From your phone or computer connect to the 'MeshCore OTA' hotspot
+7. From a browser, go to http://192.168.4.1/update and upload the non-merged bin from the flasher
 
 
 ### 7.3. Q: Is there a way to lower the chance of a failed OTA device firmware update (DFU)?
@@ -820,27 +820,27 @@ where `&type` is:
 `sensor = 4`
 
 ### 7.6. Q: How do I connect to the companion via Wi-Fi, e.g. using a heltec v3?
- **A:**
-Wi-Fi firmware requires you to compile it yourself, as you need to set the wifi ssid and password.
+**A:**
+Wi-Fi firmware requires you to compile it yourself, as you need to set the Wi-Fi ssid and password.
 Edit WIFI_SSID and WIFI_PWD in `./variants/heltec_v3/platformio.ini` and then flash it to your device.
 
 ### 7.7. Q: I have a Station G2, or a Heltec V4, or an Ikoka Stick, or a radio with a EByte E22-900M30S or a E22-900M33S module, what should their transmit power be set to?
- **A:**
+**A:**
 For companion radios, you can set these radios' transmit power in the smartphone app.  For repeater and room server radios, you can set their transmit power using the command line command `set tx`.  You can get their current value using command line command `get tx`
 
 
-  ⚠️ **WARNING: Set these values at your own risk. Incorrect power settings can permanently damage your radio hardware.**
+⚠️ **WARNING: Set these values at your own risk. Incorrect power settings can permanently damage your radio hardware.**
 
-| Device / Model | Region / Description | In-App Setting (dBm) | Target Radio Output | Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| **Station G2** <br> [Reference](https://wiki.uniteng.com/en/meshtastic/station-g2) | US915 Max Output | 19 dBm | 36.5 dBm (4.46W) | |
-| | US915 Max at 1dB compression point | 16 dBm | 35 dBm (3.16W) | 1dB compression point |
-| | EU868  Max at 1dB compression point | 15 dBm | 34.5 dBm (2.82W) | 1dB compression point |
-| | US915 1W Output | 10 dBm | 1W | Refer to your local government's requirements | 
-| | EU868 1W Output | 9 dBm | 1W |Refer to your local government's requirements |
-| **Ikoka Stick E22-900M30S** | 1W Model | 19 dBm | 1W | **DO NOT EXCEED** (Risk of burn out) [data sheet](https://www.cdebyte.com/pdf-down.aspx?id=4216) |
-| **Ikoka Stick E22-900M33S** | 2W Model | 9 dBm | 2W | **DO NOT EXCEED** (Risk of burn out) [data sheet](https://www.cdebyte.com/pdf-down.aspx?id=4216) Refer to your local government's requirements |
-| **Heltec V4** | Standard Output | 10 dBm | 22 dBm (~0.15W) | |
-| | High Output | 22 dBm | 28 dBm (~0.5W to 0.6W) | |
+| Device / Model                                                                     | Region / Description                | In-App Setting (dBm) | Target Radio Output    | Notes                                                                                                                                          |
+|:-----------------------------------------------------------------------------------|:------------------------------------|:---------------------|:-----------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|
+| **Station G2** <br> [Reference](https://wiki.uniteng.com/en/meshtastic/station-g2) | US915 Max Output                    | 19 dBm               | 36.5 dBm (4.46W)       |                                                                                                                                                |
+|                                                                                    | US915 Max at 1dB compression point  | 16 dBm               | 35 dBm (3.16W)         | 1dB compression point                                                                                                                          |
+|                                                                                    | EU868  Max at 1dB compression point | 15 dBm               | 34.5 dBm (2.82W)       | 1dB compression point                                                                                                                          |
+|                                                                                    | US915 1W Output                     | 10 dBm               | 1W                     | Refer to your local government's requirements                                                                                                  | 
+|                                                                                    | EU868 1W Output                     | 9 dBm                | 1W                     | Refer to your local government's requirements                                                                                                  |
+| **Ikoka Stick E22-900M30S**                                                        | 1W Model                            | 19 dBm               | 1W                     | **DO NOT EXCEED** (Risk of burn out) [data sheet](https://www.cdebyte.com/pdf-down.aspx?id=4216)                                               |
+| **Ikoka Stick E22-900M33S**                                                        | 2W Model                            | 9 dBm                | 2W                     | **DO NOT EXCEED** (Risk of burn out) [data sheet](https://www.cdebyte.com/pdf-down.aspx?id=4216) Refer to your local government's requirements |
+| **Heltec V4**                                                                      | Standard Output                     | 10 dBm               | 22 dBm (~0.15W)        |                                                                                                                                                |
+|                                                                                    | High Output                         | 22 dBm               | 28 dBm (~0.5W to 0.6W) |                                                                                                                                                |
 
 ---
