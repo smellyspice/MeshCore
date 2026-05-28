@@ -34,7 +34,7 @@ MeshCore provides the ability to create wireless mesh networks, similar to Mesht
 - Flash the MeshCore firmware on a supported device.
 - Connect with a supported client.
 
-For developers;
+For developers:
 
 - Install [PlatformIO](https://docs.platformio.org) in [Visual Studio Code](https://code.visualstudio.com).
 - Clone and open the MeshCore repository in Visual Studio Code.
