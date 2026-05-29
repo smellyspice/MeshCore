@@ -21,17 +21,20 @@
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
 static const uint8_t bsec_config_iaq[] = {
-#include "config/generic_33v_3s_28d/bsec_iaq.txt"
+#include "config/generic_33v_3s_28d/bsec_iaq.txt" // 3.3v, LP, 28 day background calibration window
 };
-static Bsec    bsec_iaq;
-static float   bsec_temperature  = 0;
-static float   bsec_humidity     = 0;
-static float   bsec_pressure_hpa = 0;
-static float   bsec_iaq_val      = 0;
-static uint8_t bsec_accuracy     = 0;
-static bool    bsec_active       = false;
-static bool    bsec_data_ready   = false;
+static Bsec     bsec_iaq;
+static float    bsec_temperature     = 0;
+static float    bsec_humidity        = 0;
+static float    bsec_pressure_hpa    = 0;
+static float    bsec_iaq_val         = 0;
+static uint8_t  bsec_accuracy        = 0;
+static bool     bsec_active          = false;
+static bool     bsec_data_ready      = false;
+static bool     bsec_first_save_done = false;
+static uint32_t bsec_last_save_ms    = 0;
 #define BSEC_STATE_FILE "/bsec_state.bin"
+#define BSEC_SAVE_INTERVAL_MS (8UL * 60 * 60 * 1000) // 8 hour state-save interval
 #endif
 
 #ifdef ENV_INCLUDE_BME680
@@ -501,7 +504,6 @@ static uint8_t init_bme680_bsec(TwoWire* wire, uint8_t addr) {
 
 static void query_bme680_bsec(uint8_t ch, uint8_t, CayenneLPP& lpp) {
   if (!bsec_data_ready) return;
-  bsec_data_ready = false;
   lpp.addTemperature(ch, bsec_temperature);
   lpp.addRelativeHumidity(ch, bsec_humidity);
   lpp.addBarometricPressure(ch, bsec_pressure_hpa);
@@ -906,9 +908,18 @@ void EnvironmentSensorManager::loop() {
     bsec_iaq_val      = bsec_iaq.iaq;
     bsec_accuracy     = bsec_iaq.iaqAccuracy;
     bsec_data_ready   = true;
-    if (bsec_accuracy >= 2 && bsec_accuracy > prev_accuracy)
-      bsec_save_state();
+
+    if (bsec_accuracy == 3) {
+      if (!bsec_first_save_done) {
+        bsec_save_state();
+        bsec_last_save_ms = millis();
+        bsec_first_save_done = true;
+      } else if ((millis() - bsec_last_save_ms) >= BSEC_SAVE_INTERVAL_MS) {
+        bsec_save_state();
+        bsec_last_save_ms = millis();
+      }
+    }
   }
-  #endif
+  #endif  // ENV_INCLUDE_BME680_BSEC
 }
 #endif // ENV_INCLUDE_GPS || ENV_INCLUDE_BME680_BSEC
