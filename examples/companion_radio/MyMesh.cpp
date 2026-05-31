@@ -2222,3 +2222,8 @@ bool MyMesh::advert() {
     return false;
   }
 }
+
+// To check if there is pending work
+bool MyMesh::hasPendingWork() const {
+  return _mgr->getOutboundTotal() > 0;
+}
