@@ -219,20 +219,6 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ---
 
-#### View or change the boosted receive gain mode
-**Usage:**
-- `get radio.rxgain`
-- `set radio.rxgain <state>`
-
-**Parameters:**
-- `state`: `on`|`off`
-
-**Default:** `off`
-
-**Note:** Only available on SX1262 and SX1268 based boards.
-
----
-
 #### Change the radio parameters for a set duration
 **Usage:** 
 - `tempradio <freq>,<bw>,<sf>,<cr>,<timeout_mins>`
@@ -263,7 +249,7 @@ This document provides an overview of CLI commands that can be sent to MeshCore 
 
 ---
 
-#### View or change this node's rx boosted gain mode (SX12xx only, v1.14.1+)
+#### View or change this node's rx boosted gain mode (SX12xx and LR1110, v1.14.1+)
 **Usage:**
 - `get radio.rxgain`
 - `set radio.rxgain <state>`
