@@ -67,18 +67,25 @@ void BaseChatMesh::bootstrapRTCfromContacts() {
   }
 }
 
-ContactInfo* BaseChatMesh::allocateContactSlot() {
+ContactInfo* BaseChatMesh::allocateContactSlot(bool transient_only) {
   if (num_contacts < MAX_CONTACTS) {
     return &contacts[num_contacts++];
-  } else if (shouldOverwriteWhenFull()) {
+  } else if (transient_only || shouldOverwriteWhenFull()) {
     // Find oldest non-favourite contact by oldest lastmod timestamp
     int oldest_idx = -1;
     uint32_t oldest_lastmod = 0xFFFFFFFF;
     for (int i = 0; i < num_contacts; i++) {
-      bool is_favourite = (contacts[i].flags & 0x01) != 0;
-      if (!is_favourite && contacts[i].lastmod < oldest_lastmod && contacts[i].type != ADV_TYPE_NONE) {
-        oldest_lastmod = contacts[i].lastmod;
-        oldest_idx = i;
+      if (transient_only) {
+        if (contacts[i].type == ADV_TYPE_NONE && contacts[i].lastmod < oldest_lastmod) {
+          oldest_lastmod = contacts[i].lastmod;
+          oldest_idx = i;
+        }
+      } else {
+        bool is_favourite = (contacts[i].flags & 0x01) != 0;
+        if (!is_favourite && contacts[i].lastmod < oldest_lastmod && contacts[i].type != ADV_TYPE_NONE) {
+          oldest_lastmod = contacts[i].lastmod;
+          oldest_idx = i;
+        }
       }
     }
     if (oldest_idx >= 0) {
@@ -830,7 +837,7 @@ ContactInfo* BaseChatMesh::lookupContactByPubKey(const uint8_t* pub_key, int pre
 }
 
 bool BaseChatMesh::addContact(const ContactInfo& contact) {
-  ContactInfo* dest = allocateContactSlot();
+  ContactInfo* dest = allocateContactSlot(contact.type == ADV_TYPE_NONE);
   if (dest) {
     *dest = contact;
     dest->shared_secret_valid = false; // mark shared_secret as needing calculation

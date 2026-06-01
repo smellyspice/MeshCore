@@ -2186,7 +2186,15 @@ void MyMesh::checkSerialInterface() {
              && !_serial->isWriteBusy() // don't spam the Serial Interface too quickly!
   ) {
     ContactInfo contact;
-    if (_iter.hasNext(this, contact)) {
+    bool found = false;
+    while (_iter.hasNext(this, contact)) {
+      if (contact.type != ADV_TYPE_NONE) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
       if (contact.lastmod > _iter_filter_since) { // apply the 'since' filter
         writeContactRespFrame(RESP_CODE_CONTACT, contact);
         if (contact.lastmod > _most_recent_lastmod) {
