@@ -14,6 +14,8 @@
 #define ADVERT_LOC_SHARE      1
 #define ADVERT_LOC_PREFS      2
 
+#define FLOOD_MAX_UNSCOPED_UNSET 0xFF
+
 #define LOOP_DETECT_OFF       0
 #define LOOP_DETECT_MINIMAL   1
 #define LOOP_DETECT_MODERATE  2
@@ -40,6 +42,7 @@ struct NodePrefs { // persisted to file
   uint8_t multi_acks;
   float bw;
   uint8_t flood_max;
+  uint8_t flood_max_unscoped;
   uint8_t interference_threshold;
   uint8_t agc_reset_interval; // secs / 4
   // Bridge settings
