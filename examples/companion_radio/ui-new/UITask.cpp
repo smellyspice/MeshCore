@@ -832,22 +832,20 @@ void UITask::loop() {
   if (millis() > next_batt_chck) {
     uint16_t milliVolts = getBattMilliVolts();
     if (milliVolts > 0 && milliVolts < AUTO_SHUTDOWN_MILLIVOLTS) {
-
-      // show low battery shutdown alert
-      // we should only do this for eink displays, which will persist after power loss
-      #if defined(THINKNODE_M1) || defined(LILYGO_TECHO)
-      if (_display != NULL) {
-        _display->startFrame();
-        _display->setTextSize(2);
-        _display->setColor(DisplayDriver::RED);
-        _display->drawTextCentered(_display->width() / 2, 20, "Low Battery.");
-        _display->drawTextCentered(_display->width() / 2, 40, "Shutting Down!");
-        _display->endFrame();
+      if(!board.isExternalPowered()) {
+        if (_display != NULL) {
+          _display->startFrame();
+          _display->setTextSize(2);
+          _display->setColor(DisplayDriver::RED);
+          _display->drawTextCentered(_display->width() / 2, 20, "Low Battery.");
+          _display->drawTextCentered(_display->width() / 2, 40, "Shutting Down!");
+          _display->endFrame();
+          #if !defined(THINKNODE_M1) && !defined(LILYGO_TECHO) // TODO: refactor eink variants to use EINK_DISPLAY macros to gate this properly
+          delay(3000);
+          #endif
+        }
+        shutdown();
       }
-      #endif
-
-      shutdown();
-
     }
     next_batt_chck = millis() + 8000;
   }
