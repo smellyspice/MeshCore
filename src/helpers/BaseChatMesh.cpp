@@ -76,7 +76,7 @@ ContactInfo* BaseChatMesh::allocateContactSlot() {
     uint32_t oldest_lastmod = 0xFFFFFFFF;
     for (int i = 0; i < num_contacts; i++) {
       bool is_favourite = (contacts[i].flags & 0x01) != 0;
-      if (!is_favourite && contacts[i].lastmod < oldest_lastmod) {
+      if (!is_favourite && contacts[i].lastmod < oldest_lastmod && contacts[i].type != ADV_TYPE_NONE) {
         oldest_lastmod = contacts[i].lastmod;
         oldest_idx = i;
       }
@@ -164,16 +164,17 @@ void BaseChatMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, 
     from->sync_since = 0;
     from->shared_secret_valid = false;
   }
+
   // update
-    putBlobByKey(id.pub_key, PUB_KEY_SIZE, temp_buf, plen);
-    StrHelper::strncpy(from->name, parser.getName(), sizeof(from->name));
-    from->type = parser.getType();
-    if (parser.hasLatLon()) {
-      from->gps_lat = parser.getIntLat();
-      from->gps_lon = parser.getIntLon();
-    }
-    from->last_advert_timestamp = timestamp;
-    from->lastmod = getRTCClock()->getCurrentTime();
+  putBlobByKey(id.pub_key, PUB_KEY_SIZE, temp_buf, plen);
+  StrHelper::strncpy(from->name, parser.getName(), sizeof(from->name));
+  from->type = parser.getType();
+  if (parser.hasLatLon()) {
+    from->gps_lat = parser.getIntLat();
+    from->gps_lon = parser.getIntLon();
+  }
+  from->last_advert_timestamp = timestamp;
+  from->lastmod = getRTCClock()->getCurrentTime();
 
   onDiscoveredContact(*from, is_new, packet->path_len, packet->path);       // let UI know
 }
