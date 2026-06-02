@@ -59,8 +59,8 @@ A list of frequently-asked questions and answers for MeshCore
     - [5.8. Q: How can I support MeshCore?](#58-q-how-can-i-support-meshcore)
     - [5.9. Q: How do I build MeshCore firmware from source?](#59-q-how-do-i-build-meshcore-firmware-from-source)
     - [5.10. Q: Are there other MeshCore related open source projects?](#510-q-are-there-other-meshcore-related-open-source-projects)
-    - [5.11. Q: Does MeshCore support ATAK](#511-q-does-meshcore-support-atak)
-    - [5.12. Q: How do I add a node to the MeshCore Map](#512-q-how-do-i-add-a-node-to-the-meshcore-map)
+    - [5.11. Q: Does MeshCore support ATAK?](#511-q-does-meshcore-support-atak)
+    - [5.12. Q: How do I add a node to the MeshCore Map?](#512-q-how-do-i-add-a-node-to-the-meshcore-map)
     - [5.13. Q: Can I use a Raspberry Pi to update a MeshCore radio?](#513-q-can-i-use-a-raspberry-pi-to-update-a-meshcore-radio)
     - [5.14. Q: Are there projects built around MeshCore?](#514-q-are-there-projects-built-around-meshcore)
     - [5.15. Q: Are there client applications for Windows or Mac?](#515-q-are-there-client-applications-for-windows-or-mac)
@@ -223,7 +223,8 @@ The separate `set advert.interval {minutes}` command controls the local zero-hop
 ## 3. Server Administration
 
 ### 3.1. Q: How do you configure a repeater or a room server?
-**A:** - When MeshCore is flashed onto a LoRa device for the first time, it is necessary to set the server device's frequency to make it utilize the frequency that is legal in your country or region.
+
+**A:** When MeshCore is flashed onto a LoRa device for the first time, it is necessary to set the server device's frequency to make it utilize the frequency that is legal in your country or region.
 
 Repeater or room server can be administered with one of the options below:
 
@@ -383,6 +384,7 @@ The smartphone app key is in hex:
 
 ### 4.7. Q: How do I get maps on T-Deck?
 **A:** You need map tiles. You can get pre-downloaded map tiles here (a good way to support development):
+
 - <https://buymeacoffee.com/ripplebiz/e/342543> (Europe)
 - <https://buymeacoffee.com/ripplebiz/e/342542> (US)
 
@@ -562,19 +564,21 @@ Andy also has a video on how to build using VS Code:
 Web client: <https://github.com/liamcottle/meshcore-web>
 Javascript: <https://github.com/liamcottle/meshcore.js>
 
-### 5.11. Q: Does MeshCore support ATAK
+### 5.11. Q: Does MeshCore support ATAK?
 **A:** ATAK is not currently on MeshCore's roadmap.
 
 MeshCore would not be best suited to ATAK because MeshCore:
-clients do not repeat and therefore you would need a network of repeaters in place
-will not have a stable path where all clients are constantly moving between repeaters
+
+- clients do not repeat and therefore you would need a network of repeaters in place
+- will not have a stable path where all clients are constantly moving between repeaters
 
 MeshCore clients would need to reset path constantly and flood traffic across the network which could lead to lots of collisions with something as chatty as ATAK.
 
 This could change in the future if MeshCore develops a client firmware that repeats.
+
 [Source](https://discord.com/channels/826570251612323860/1330643963501351004/1354780032140054659)
 
-### 5.12. Q: How do I add a node to the [MeshCore Map](https://map.meshcore.io)
+### 5.12. Q: How do I add a node to the [MeshCore Map](https://map.meshcore.io)?
 **A:**
 
 To add a BLE Companion radio, connect to the BLE Companion radio from the MeshCore smartphone app. In the app, tap the `3 dot` menu icon at the top right corner, then tap `Internet Map`. Tap the `3 dot` menu icon again and choose `Add me to the Map`
@@ -716,9 +720,11 @@ Separately, starting in firmware version 1.7.0, there is a CLI Rescue mode. If y
 
 ### 6.8. Q: WebFlasher fails on Linux with failed to open
 **A:** If the usb port doesn't have the right ownership for this task, the process fails with the following error:
+
 `NetworkError: Failed to execute 'open' on 'SerialPort': Failed to open serial port.`
 
 Allow the browser user on it:
+
 `# setfacl -m u:YOUR_USER_HERE:rw /dev/ttyUSB0`
 
 ---
@@ -773,6 +779,7 @@ After this bootloader is flashed onto the device, you can trigger an over-the-ai
 Refer to <https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX> for the latest information.
 
 Currently, the following boards are supported:
+
 - Heltec Automation Mesh Node T114 / HT-nRF5262
 - Nologo ProMicro NRF52840 (aka SuperMini NRF52840)
 - Seeed Studio SenseCAP Card Tracker T1000-E
@@ -787,15 +794,17 @@ Currently, the following boards are supported:
 
 ### 7.5. Q: What is the format of a contact or channel QR code?
 **A:**
+
 Channel: `meshcore://channel/add?name=<name>&secret=<secret>`
 
 Contact: `meshcore://contact/add?name=<name>&public_key=<secret>&type=<type>`
 
 where `&type` is:
-`chat = 1`
-`repeater = 2`
-`room = 3`
-`sensor = 4`
+
+- `chat = 1`
+- `repeater = 2`
+- `room = 3`
+- `sensor = 4`
 
 ### 7.6. Q: How do I connect to the companion via Wi-Fi, e.g. using a Heltec V3?
 **A:**
