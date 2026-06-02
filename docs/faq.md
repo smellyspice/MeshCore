@@ -785,6 +785,7 @@ After this bootloader is flashed onto the device, you can trigger an over-the-ai
 ### 7.2. Q: How to update ESP32-based devices over the air?
 
 **A:** For ESP32-based devices (e.g. Heltec V3):
+
 1. On <https://flasher.meshcore.io>, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name)
 2. From the MeshCore app, log in remotely to the repeater you want to update with admin privileges
 3. Go to the Command Line tab, type `start ota` and hit enter.
