@@ -810,7 +810,7 @@ Currently, the following boards are supported:
 - RAK 4631
 - RAK WisMesh Tag (new 28/11/2025)
 
-### 7.4. Q: are the MeshCore logo and font available?
+### 7.4. Q: Are the MeshCore logo and font available?
 
 **A:** Yes, it is on the MeshCore GitHub repo here:
 <https://github.com/meshcore-dev/MeshCore/tree/main/logo>
