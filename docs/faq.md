@@ -87,10 +87,10 @@ A list of frequently-asked questions and answers for MeshCore
 ## 1. Introduction
 
 ### 1.1. Q: What is MeshCore?
-
 **A:** MeshCore is a multi-platform system for enabling secure text-based communications utilizing LoRa radio hardware. It can be used for Off-Grid Communication, Emergency Response & Disaster Recovery, Outdoor Activities, Tactical Security including law enforcement and private security and also IoT sensor networks. ([source](https://meshcore.io/))
 
 MeshCore is free and open source:
+
 - MeshCore is the routing and firmware etc., available on GitHub under MIT license
 - There are clients made by the community, such as the web clients, these are free to use, and some are open source too
 - The cross-platform mobile app developed by [Liam Cottle](https://liamcottle.net) for Android/iOS/PC etc. is free to download and use
