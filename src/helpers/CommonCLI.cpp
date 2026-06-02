@@ -121,11 +121,6 @@ void CommonCLI::loadPrefsInt(FILESYSTEM* fs, const char* filename) {
     // sanitise settings
     _prefs->rx_boosted_gain = constrain(_prefs->rx_boosted_gain, 0, 1); // boolean
 
-    // sanitise only if user sets unscoped max
-    if (_prefs->flood_max_unscoped != FLOOD_MAX_UNSCOPED_UNSET) {
-      _prefs->flood_max_unscoped = constrain(_prefs->flood_max_unscoped, 0, 64);
-    }
-
     file.close();
   }
 }
@@ -799,11 +794,7 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "txdelay", 7) == 0) {
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->tx_delay_factor));
   } else if (memcmp(config, "flood.max.unscoped", 18) == 0) {
-    if (_prefs->flood_max_unscoped == FLOOD_MAX_UNSCOPED_UNSET) {
-      sprintf(reply, "> default (tracks flood.max=%u)", (unsigned)_prefs->flood_max);
-    } else {
-      sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_unscoped);
-    }
+    sprintf(reply, "> %d", (uint32_t)_prefs->flood_max_unscoped);
   } else if (memcmp(config, "flood.max", 9) == 0) {
     sprintf(reply, "> %d", (uint32_t)_prefs->flood_max);
   } else if (memcmp(config, "direct.txdelay", 14) == 0) {

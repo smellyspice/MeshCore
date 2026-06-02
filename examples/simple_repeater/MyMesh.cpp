@@ -429,12 +429,8 @@ void MyMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, ui
 bool MyMesh::allowPacketForward(const mesh::Packet *packet) {
   if (_prefs.disable_fwd) return false;
   if (packet->isRouteFlood()) {
-    uint8_t limit = _prefs.flood_max;
-    if (packet->getRouteType() == ROUTE_TYPE_FLOOD
-        && _prefs.flood_max_unscoped != FLOOD_MAX_UNSCOPED_UNSET) {
-      limit = _prefs.flood_max_unscoped;
-    }
-    if (packet->getPathHashCount() >= limit) return false;
+    if (packet->getPathHashCount() >= _prefs.flood_max) return false;
+    if (packet->getRouteType() == ROUTE_TYPE_FLOOD && packet->getPathHashCount() >= _prefs.flood_max_unscoped) return false;
   }
   if (packet->isRouteFlood() && recv_pkt_region == NULL) {
     MESH_DEBUG_PRINTLN("allowPacketForward: unknown transport code, or wildcard not allowed for FLOOD packet");
@@ -893,7 +889,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.advert_interval = 1;        // default to 2 minutes for NEW installs
   _prefs.flood_advert_interval = 47; // 47 hours
   _prefs.flood_max = 64;
-  _prefs.flood_max_unscoped = FLOOD_MAX_UNSCOPED_UNSET;
+  _prefs.flood_max_unscoped = 64;
   _prefs.interference_threshold = 0; // disabled
 
   // bridge defaults
