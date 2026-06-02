@@ -799,7 +799,7 @@ Channel: `meshcore://channel/add?name=<name>&secret=<secret>`
 
 Contact: `meshcore://contact/add?name=<name>&public_key=<secret>&type=<type>`
 
-where `&type` is:
+Where `&type` is:
 
 - `chat = 1`
 - `repeater = 2`
