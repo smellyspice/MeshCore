@@ -735,7 +735,7 @@ void UITask::loop() {
         _display->setTextSize(1);
         _display->drawTextCentered(_display->width() / 2, 18, "Shutting down!");
         _display->endFrame();
-        delay(3000); // TODO: refactor eink variants to use EINK_DISPLAY macros to gate this properly
+        if (_display->isEink() == false) { delay(3000); }
         }
         shutdown();
       }

@@ -840,9 +840,7 @@ void UITask::loop() {
           _display->drawTextCentered(_display->width() / 2, 20, "Low Battery.");
           _display->drawTextCentered(_display->width() / 2, 40, "Shutting Down!");
           _display->endFrame();
-          #if !defined(THINKNODE_M1) && !defined(LILYGO_TECHO) // TODO: refactor eink variants to use EINK_DISPLAY macros to gate this properly
-          delay(3000);
-          #endif
+          if (_display->isEink() == false) { delay(3000); }
         }
         shutdown();
       }
