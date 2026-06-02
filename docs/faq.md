@@ -119,7 +119,7 @@ You need LoRa hardware devices to run MeshCore firmware as clients or server (re
 #### 1.2.1. Hardware
 MeshCore is available on a variety of 433MHz, 868MHz and 915MHz LoRa devices. For example, Lilygo T-Deck, T-Pager, RAK Wireless WisBlock RAK4631 devices (e.g. 19003, 19007, 19026), Heltec V3, Xiao S3 WIO, Xiao C3, Heltec T114, Station G2, Nano G2 Ultra, Seeed Studio T1000-E. More devices are being added regularly.
 
-For an up-to-date list of supported devices, please go to https://flasher.meshcore.io
+For an up-to-date list of supported devices, please go to <https://flasher.meshcore.io>
 
 To use MeshCore without using a phone as the client interface, you can run MeshCore on a LilyGo T-Deck, T-Deck Plus, T-Pager, T-Watch, or T-Display Pro. MeshCore Ultra firmware running on these devices is a complete off-grid secure communication solution.
 
@@ -131,11 +131,11 @@ Companion radios are for connecting to the Android app or web app as a messenger
 
 1. **BLE Companion**
    BLE Companion firmware runs on a supported LoRa device and connects to a smart device running the Android or iOS MeshCore client over BLE
-   <https://meshcore.io/>
+   <https://meshcore.io>
 
 2. **USB Serial Companion**
    USB Serial Companion firmware runs on a supported LoRa device and connects to a smart device or a computer over USB Serial running the MeshCore web client
-   <https://app.meshcore.nz/>
+   <https://app.meshcore.nz>
 
 #### 1.2.4. Repeater
 Repeaters are used to extend the range of a MeshCore network. Repeater firmware runs on the same devices that run client firmware. A repeater's job is to forward MeshCore packets to the destination device. It does **not** forward or retransmit every packet it receives, unlike other LoRa mesh systems.
@@ -172,7 +172,7 @@ After you flashed the latest firmware onto your repeater device, keep the device
 
 `set freq {frequency}`
 
-The repeater and room server CLI reference is here: https://docs.meshcore.io/cli_commands
+The repeater and room server CLI reference is here: <https://docs.meshcore.io/cli_commands>
 
 If you have more supported devices, you can use your additional devices with the room server firmware.
 
@@ -233,7 +233,7 @@ Repeater or room server can be administered with one of the options below:
 
 ![image](https://github.com/user-attachments/assets/2a9d9894-e34d-4dbe-b57c-fc3c250a2d34)
 
-- Connect the server device using a USB cable to a computer running Chrome on https://flasher.meshcore.io, then use the `console` feature to connect to the device
+- Connect the server device using a USB cable to a computer running Chrome on <https://flasher.meshcore.io>, then use the `console` feature to connect to the device
 
 - Use a MeshCore smartphone client to remotely administer servers via LoRa.
 
@@ -294,7 +294,7 @@ This is a very low-cost operation. AGC reset is done by simply setting `state = 
 
 ### 3.8. Q: How do I make my repeater an observer on the mesh?
 
-**A:** The observer instruction is available here: https://analyzer.letsmesh.net/observer/onboard
+**A:** The observer instruction is available here: <https://analyzer.letsmesh.net/observer/onboard>
 
 ### 3.9. Q: What is multibyte support? What do 1-byte, 2-byte, 3-byte adverts and messages mean?
 
@@ -354,7 +354,7 @@ You should move to send 2-byte or 3-byte channel and direct messages when the va
 
 ### 4.1. Q: Is there a user guide for T-Deck, T-Pager, T-Watch, or T-Display Pro?
 
-**A:** Yes, it is available on https://buymeacoffee.com/ripplebiz/ultra-v7-7-guide-meshcore-users
+**A:** Yes, it is available on <https://buymeacoffee.com/ripplebiz/ultra-v7-7-guide-meshcore-users>
 
 ### 4.2. Q: What are the steps to get a T-Deck into DFU (Device Firmware Update) mode?
 **A:**
@@ -420,7 +420,7 @@ Unlock page: <https://buymeacoffee.com/ripplebiz/e/249834>
 `{hops} l:{packet-length}({payload-len}) t:{packet-type} snr:{n} rssi:{n}`
 
 See here for packet-type:
-https://github.com/meshcore-dev/MeshCore/blob/main/src/Packet.h#L19
+<https://github.com/meshcore-dev/MeshCore/blob/main/src/Packet.h#L19>
 
 ```
 #define PAYLOAD_TYPE_REQ 0x00 // request (prefixed with dest/src hashes, MAC) (enc data: timestamp, blob)
@@ -438,7 +438,7 @@ https://github.com/meshcore-dev/MeshCore/blob/main/src/Packet.h#L19
 ### 4.11. Q: The T-Deck sound is too loud?
 ### 4.12. Q: Can you customize the sound?
 
-**A:** You can customise the sounds on the T-Deck, by placing `.mp3` files onto the `root` dir of the SD card. The files are:
+**A:** You can customize the sounds on the T-Deck, by placing `.mp3` files onto the `root` dir of the SD card. The files are:
 
 * `startup.mp3`
 * `error.mp3`
@@ -491,6 +491,7 @@ So, it's a balancing act between speed of the transmission and resistance to noi
 The Things Network is mainly focused on LoRaWAN, but the LoRa low-level stuff still checks out for any LoRa project
 
 ### 5.2. Q: Do MeshCore clients repeat?
+
 **A:** No, MeshCore clients do not repeat. This is the core of MeshCore's messaging-first design. This is to avoid devices flooding the airwaves and create endless collisions, so messages sent aren't received.
 In MeshCore, only repeaters and room servers with `set repeat on` repeat.
 
@@ -514,17 +515,25 @@ Routes are stored in sender's contact list. When you send a message the first ti
 
 
 ### 5.6. Q: What is the public key for the default public channel?
-**A:** The smartphone app key is in hex:
-` 8b3387e9c5cdea6ac9e5edbaa115cd72`
 
-T-Deck uses the same key but in base64
+**A:** The smartphone app key is in hex:
+
+`8b3387e9c5cdea6ac9e5edbaa115cd72`
+
+T-Deck uses the same key but in base64:
+
 `izOH6cXN6mrJ5e26oRXNcg==`
-The third character is the capital letter 'O', not zero `0`
+
+The third character is the capital letter `O`, not zero `0`.
+
 [Source](https://discord.com/channels/826570251612323860/1330643963501351004/1354194409213792388)
 
+
 ### 5.7. Q: Is MeshCore open source?
+
 **A:** Most of the firmware is freely available. Everything is open source except the T-Deck firmware and Liam's native mobile apps.
-- Firmware repo: https://github.com/meshcore-dev/MeshCore
+
+Firmware repo: <https://github.com/meshcore-dev/MeshCore>
 
 ### 5.8. Q: How can I support MeshCore?
 **A:** Provide your honest feedback on GitHub and on [MeshCore Discord server](https://meshcore.gg). Spread the word of MeshCore to your friends and communities; help them get started with MeshCore. Support Scott's MeshCore development at <https://buymeacoffee.com/ripplebiz>.
@@ -535,11 +544,11 @@ Support Rastislav Vysoky (recrof)'s flasher website and the map website developm
 
 ### 5.9. Q: How do I build MeshCore firmware from source?
 **A:** See instructions here:
-https://discord.com/channels/826570251612323860/1330643963501351004/1341826372120608769
+<https://discord.com/channels/826570251612323860/1330643963501351004/1341826372120608769>
 
 Build instructions for MeshCore:
 
-For Windows, first install WSL and Python+pip via: https://plainenglish.io/blog/setting-up-python-on-windows-subsystem-for-linux-wsl-26510f1b2d80
+For Windows, first install WSL and Python+pip via: <https://plainenglish.io/blog/setting-up-python-on-windows-subsystem-for-linux-wsl-26510f1b2d80>
 
 (Linux, Windows+WSL) In the terminal/shell:
 ```
@@ -565,15 +574,15 @@ pio run -e RAK_4631_Repeater
 then you'll find `firmware.zip` in `.pio/build/RAK_4631_Repeater`
 
 Andy also has a video on how to build using VS Code:
-*How to build and flash MeshCore repeater firmware | Heltec V3*
+*How to build and flash Meshcore repeater firmware | Heltec V3*
 <https://www.youtube.com/watch?v=WJvg6dt13hk> *(Link referenced in the Discord post)*
 
 ### 5.10. Q: Are there other MeshCore related open source projects?
 
 **A:** [Liam Cottle](https://liamcottle.net)'s MeshCore web client and MeshCore JavaScript library are open source under MIT license.
 
-Web client: https://github.com/liamcottle/meshcore-web
-Javascript: https://github.com/liamcottle/meshcore.js
+Web client: <https://github.com/liamcottle/meshcore-web>
+Javascript: <https://github.com/liamcottle/meshcore.js>
 
 ### 5.11. Q: Does MeshCore support ATAK
 **A:** ATAK is not currently on MeshCore's roadmap.
@@ -604,7 +613,8 @@ Below are the instructions to flash firmware onto a supported LoRa device using 
 > Instructions for nRF devices like RAK, T1000-E, T114 are immediately after the ESP instructions
 
 For ESP-based devices (e.g. Heltec V3) you need:
-- Download firmware file from https://flasher.meshcore.io
+
+- Download firmware file from <https://flasher.meshcore.io>
     - Go to the website on a browser, find the section that has the firmware you need
     - Click the Download button, right-click on the file you need, for example,
         - `Heltec_V3_companion_radio_ble-v1.7.1-165fb33.bin`
@@ -632,7 +642,7 @@ For ESP-based devices (e.g. Heltec V3) you need:
 **Instructions for nRF devices:**
 
 For nRF devices (e.g. RAK, Heltec T114) you need the following:
-- Download firmware file from https://flasher.meshcore.io
+- Download firmware file from <https://flasher.meshcore.io>
     - Go to the website on a browser, find the section that has the firmware you need
     - You need the ZIP version for the adafruit flash tool (below)
     - Click the Download button, right-click on the ZIP file, for example:
@@ -656,19 +666,19 @@ To start managing your USB serial-connected device using picocom, use the follow
 - `picocom -b 115200 /dev/ttyUSB0 --imap lfcrlf`
 
 From here, reference repeater and room server command line commands in the MeshCore docs here:
-- https://docs.meshcore.io/cli_commands
+- <https://docs.meshcore.io/cli_commands>
 
 
 ### 5.14. Q: Are there projects built around MeshCore?
 
 **A:** Yes, there are many. MeshCore's protocol is open source using the MIT license. The MIT license and the open source protocol makes it very easy for the MeshCore community to build new firmware for radios, applications on mobile devices, map tools, and analysis tools, and integration with other projects like Home Assistant.
 
-As new MeshCore community projects become available on a weekly basis, we have stopped tracking them here in this FAQ. [samuk](https://github.com/samuk) maintains a very exhaustive list of MeshCore community project at https://github.com/samuk/awesome-meshcore/blob/main/README.md. samuk accepts PRs and merges them regularly.
+As new MeshCore community projects become available on a weekly basis, we have stopped tracking them here in this FAQ. [samuk](https://github.com/samuk) maintains a very exhaustive list of MeshCore community project at <https://github.com/samuk/awesome-meshcore/blob/main/README.md>. samuk accepts PRs and merges them regularly.
 
 
 ### 5.15. Q: Are there client applications for Windows or Mac?
 **A:** Yes, the same iOS and Android client is also available for Windows and Mac. You can find them together with the Android APK here:
-https://files.liamcottle.net/MeshCore
+<https://files.liamcottle.net/MeshCore>
 
 Both the Windows and Mac versions of the client app are fully unlocked and are free to use.
 
@@ -676,9 +686,9 @@ Both the Windows and Mac versions of the client app are fully unlocked and are f
 
 **A:** Here is a list of MeshCore comparison resources:
 
-- The Comms Channel on YouTube: https://www.youtube.com/watch?v=guDoKGs02Us
-- MeshCore Advantages by MCarper: https://github.com/mikecarper/meshfirmware/blob/main/MeshCoreAdvantages.md
-- MeshCore vs Meshtastic by austinmesh.org: https://www.austinmesh.org/learn/meshcore-vs-meshtastic
+- The Comms Channel on YouTube: <https://www.youtube.com/watch?v=guDoKGs02Us>
+- MeshCore Advantages by MCarper: <https://github.com/mikecarper/meshfirmware/blob/main/MeshCoreAdvantages.md>
+- MeshCore vs Meshtastic by austinmesh.org: <https://www.austinmesh.org/learn/meshcore-vs-meshtastic>
 
 
 ---
@@ -691,7 +701,7 @@ Both the Windows and Mac versions of the client app are fully unlocked and are f
 - If your client is a T-Deck, it may not have its time set (no GPS installed, no GPS lock, or wrong GPS baud rate).
 - If you are using the Android or iOS client, the other client, repeater, or room server may have the wrong time.
 
-You can get the epoch time on <https://www.epochconverter.com/> and use it to set your T-Deck clock. For a repeater and room server, the admin can use a T-Deck to remotely set their clock (clock sync), or use the `time` command in the USB serial console with the server device connected.
+You can get the epoch time on <https://www.epochconverter.com> and use it to set your T-Deck clock. For a repeater and room server, the admin can use a T-Deck to remotely set their clock (clock sync), or use the `time` command in the USB serial console with the server device connected.
 
 ### 6.3. Q: How to connect to a repeater via BLE (Bluetooth)?
 **A:** You can't connect to a device running repeater firmware via Bluetooth. You can connect to devices running the BLE companion firmware via Bluetooth using the Android app.
@@ -711,22 +721,23 @@ You can get the epoch time on <https://www.epochconverter.com/> and use it to se
 ### 6.7. Q: My RAK/T1000-E/xiao_nRF52 device seems to be corrupted, how do I wipe it clean to start fresh?
 
 **A:**
+
 1. Connect USB-C cable to your device, per your device's instruction, get it to flash mode:
     - For RAK, click the reset button **TWICE**
     - For T1000-e, quickly disconnect and reconnect the magnetic side of the cable from the device **TWICE**
     - For Heltec T114, click the reset button **TWICE** (the bottom button)
     - For Xiao nRF52, click the reset button once. If that doesn't work, quickly double-click the reset button twice. If that doesn't work, disconnect the board from your PC and reconnect again ([seeed studio wiki](https://wiki.seeedstudio.com/XIAO_BLE/#access-the-swd-pins-for-debugging-and-reflashing-bootloader))
 2. A new folder will appear on your computer's desktop
-3. Download the `flash_erase*.uf2` file for your device on https://flasher.meshcore.io
+3. Download the `flash_erase*.uf2` file for your device on <https://flasher.meshcore.io>
     - RAK WisBlock and Heltec T114: `Flash_erase-nRF32_softdevice_v6.uf2`
     - Seeed Studio Xiao nRF52 WIO: `Flash_erase-nRF52_softdevice_v7.uf2`
 4. drag and drop the uf2 file for your device to the root of the new folder
 5. Wait for the copy to complete. You might get an error dialog, you can ignore it
-6. Go to https://flasher.meshcore.io, click `Console` and select the serial port for your connected device
+6. Go to <https://flasher.meshcore.io>, click `Console` and select the serial port for your connected device
 7. In the console, press enter. Your flash should now be erased
 8. You may now flash the latest MeshCore firmware onto your device
 
-Separately, starting in firmware version 1.7.0, there is a CLI Rescue mode. If your device has a user button (e.g. some RAK, T114), you can activate the rescue mode by holding down the user button of the device within 8 seconds of boot. Then you can use the 'Console' on https://flasher.meshcore.io
+Separately, starting in firmware version 1.7.0, there is a CLI Rescue mode. If your device has a user button (e.g. some RAK, T114), you can activate the rescue mode by holding down the user button of the device within 8 seconds of boot. Then you can use the 'Console' on <https://flasher.meshcore.io>
 
 ### 6.8. Q: WebFlasher fails on Linux with failed to open
 
@@ -737,6 +748,7 @@ Allow the browser user on it:
 `# setfacl -m u:YOUR_USER_HERE:rw /dev/ttyUSB0`
 
 ---
+
 ## 7. Other Questions:
 
 ### 7.1. Q: How to update nRF (RAK, T114, Seeed XIAO) companion, repeater and room server firmware over the air using the new simpler DFU app?
@@ -744,11 +756,11 @@ Allow the browser user on it:
 **A:** The steps below work on both Android and iOS as nRF has made both apps' user interface the same on both platforms:
 
 1. Download nRF's DFU app from iOS App Store or Android's Play Store, you can find the app by searching for `nrf dfu`, the app's full name is `nRF Device Firmware Update`
-2. On https://flasher.meshcore.io, download the **ZIP** version of the firmware for your nRF device (e.g. RAK or Heltec T114 or Seeed Studio's Xiao)
+2. On <https://flasher.meshcore.io>, download the **ZIP** version of the firmware for your nRF device (e.g. RAK or Heltec T114 or Seeed Studio's Xiao)
 3. From the MeshCore app, log in remotely to the repeater you want to update with admin privileges
 4. Go to the Command Line tab, type `start ota` and hit enter.
 5. You should see `OK` to confirm the repeater device is now in OTA mode
-6. Run the DFU app, tap `Settings` on the top right corner
+6. Run the DFU app, then tap `Settings` in the top-right corner
 7. Enable `Packet receipt notifications`, and change `Number of Packets` to 10 for RAK, 8 for T114. 8 also works for RAK.
 8. Select the firmware zip file you downloaded
 9. Select the device you want to update. If the device you want to update is not on the list, try enabling `OTA` on the device again
@@ -756,16 +768,16 @@ Allow the browser user on it:
 11. Tap `Upload` to begin OTA update
 12. If it fails, try toggling Bluetooth on your phone. If that doesn't work, try rebooting your phone. If you keep getting failures at the "Enabling Bootloader" step, try forgetting the nRF board in your iOS or Android device's Bluetooth settings and re-pair it through the DFU app.
 13. Wait for the update to complete. It can take a few minutes.
-14. It is strongly recommended that you install and use the OTAFIX bootloader at https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX.
+14. It is strongly recommended that you install and use the OTAFIX bootloader at <https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX>.
 15. To update a companion node over OTA, it must be running companion firmware v1.15 or greater.
 16. Please see the MeshCore Blog for additional information on OTA firmware flashing:
-    - https://blog.meshcore.io/2026/04/06/otafix-bootloader
-    - https://blog.meshcore.io/2026/04/02/nrf-ota-update
+    - <https://blog.meshcore.io/2026/04/06/otafix-bootloader>
+    - <https://blog.meshcore.io/2026/04/02/nrf-ota-update>
 
 
 #### 7.1.1 Q: Can I update Seeed Studio Wio Tracker L1 Pro using OTA?
 **A:**  You can flash this safer bootloader to the Wio Tracker L1 Pro
-https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX
+<https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX>
 
 After this bootloader is flashed onto the device, you can trigger an over-the-air update using Bluetooth by holding the button next to the D-Pad and then clicking the reset button. Then follow the same OTA update instructions above. You can skip the `start ota` instruction and start the update using the DFU app.
 
@@ -773,20 +785,20 @@ After this bootloader is flashed onto the device, you can trigger an over-the-ai
 ### 7.2. Q: How to update ESP32-based devices over the air?
 
 **A:** For ESP32-based devices (e.g. Heltec V3):
-1. On https://flasher.meshcore.io, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name)
+1. On <https://flasher.meshcore.io>, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name)
 2. From the MeshCore app, log in remotely to the repeater you want to update with admin privileges
 3. Go to the Command Line tab, type `start ota` and hit enter.
 4. you should see `OK` to confirm the repeater device is now in OTA mode
 5. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`
 6. From your phone or computer connect to the 'MeshCore OTA' hotspot
-7. From a browser, go to http://192.168.4.1/update and upload the non-merged bin from the flasher
+7. From a browser, go to <http://192.168.4.1/update> and upload the non-merged bin from the flasher
 
 
 ### 7.3. Q: Is there a way to lower the chance of a failed OTA device firmware update (DFU)?
 
 **A:** Yes, developer `che aporeps` has an enhanced OTA DFU bootloader for nRF52 based devices. With this bootloader, if it detects that the application firmware is invalid, it falls back to OTA DFU mode so you can attempt to flash again to recover. This bootloader has other changes to make the OTA DFU process more fault tolerant.
 
-Refer to https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX for the latest information.
+Refer to <https://github.com/oltaco/Adafruit_nRF52_Bootloader_OTAFIX> for the latest information.
 
 Currently, the following boards are supported:
 - Heltec Automation Mesh Node T114 / HT-nRF5262
@@ -801,7 +813,7 @@ Currently, the following boards are supported:
 ### 7.4. Q: are the MeshCore logo and font available?
 
 **A:** Yes, it is on the MeshCore GitHub repo here:
-https://github.com/meshcore-dev/MeshCore/tree/main/logo
+<https://github.com/meshcore-dev/MeshCore/tree/main/logo>
 
 ### 7.5. Q: What is the format of a contact or channel QR code?
 
