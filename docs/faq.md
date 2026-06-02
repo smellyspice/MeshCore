@@ -274,7 +274,7 @@ Reboot the repeater after `set prv.key <hex>` command for the new private key to
 
 ### 3.6. Q: The first byte of my repeater's public key collides with an existing repeater on the mesh. How do I get a new private key with a matching public key that has its first byte of my choosing?
 
-**A:** You can generate a new private key and specify the first byte of its public key here:  https://gessaman.com/mc-keygen/
+**A:** You can generate a new private key and specify the first byte of its public key here: <https://gessaman.com/mc-keygen>
 
 Having multiple repeaters with the same first byte ID does not negatively affect the mesh or its functionality. Flood and pathed packets will still reach their destinations. First byte ID collision makes traceroute and path analysis harder because these tools don't know exactly which of the two (or more) colliding repeaters is the one in the path.
 
@@ -466,7 +466,7 @@ https://github.com/meshcore-dev/MeshCore/blob/main/src/Packet.h#L19
 
 **SF is spreading factor** - how much should the communication spread in time
 
-**CR is coding rate** - from: https://www.thethingsnetwork.org/docs/lorawan/fec-and-code-rate/
+**CR is coding rate** - from: <https://www.thethingsnetwork.org/docs/lorawan/fec-and-code-rate>
 
 TL;DR: default CR to 5 for good stable links. If it is not a solid link and is intermittent, change CR to 7 or 8.
 
@@ -675,12 +675,9 @@ Both the Windows and Mac versions of the client app are fully unlocked and are f
 ### 5.16. Q: Are there any resources that compare MeshCore to other LoRa systems?
 
 **A:** Here is a list of MeshCore comparison resources:
-The Comms Channel on YouTube:
-https://www.youtube.com/watch?v=guDoKGs02Us
-MeshCore Advantages by MCarper:
-https://github.com/mikecarper/meshfirmware/blob/main/MeshCoreAdvantages.md
-MeshCore vs Meshtastic by austinmesh.org
-https://www.austinmesh.org/learn/meshcore-vs-meshtastic
+- The Comms Channel on YouTube: https://www.youtube.com/watch?v=guDoKGs02Us
+- MeshCore Advantages by MCarper: https://github.com/mikecarper/meshfirmware/blob/main/MeshCoreAdvantages.md
+- MeshCore vs Meshtastic by austinmesh.org: https://www.austinmesh.org/learn/meshcore-vs-meshtastic
 
 
 ---
