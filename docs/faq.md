@@ -675,6 +675,7 @@ Both the Windows and Mac versions of the client app are fully unlocked and are f
 ### 5.16. Q: Are there any resources that compare MeshCore to other LoRa systems?
 
 **A:** Here is a list of MeshCore comparison resources:
+
 - The Comms Channel on YouTube: https://www.youtube.com/watch?v=guDoKGs02Us
 - MeshCore Advantages by MCarper: https://github.com/mikecarper/meshfirmware/blob/main/MeshCoreAdvantages.md
 - MeshCore vs Meshtastic by austinmesh.org: https://www.austinmesh.org/learn/meshcore-vs-meshtastic
