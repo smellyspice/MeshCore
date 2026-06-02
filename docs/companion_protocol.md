@@ -73,7 +73,7 @@ MeshCore Companion devices expose a BLE service with the following UUIDs:
 
 5. **Send Initial Commands**
     - Send `CMD_APP_START` to identify your app to firmware and get radio settings
-    - Send `CMD_DEVICE_QEURY` to fetch device info and negotiate supported protocol versions
+    - Send `CMD_DEVICE_QUERY` to fetch device info and negotiate supported protocol versions
     - Send `CMD_SET_DEVICE_TIME` to set the firmware clock
     - Send `CMD_GET_CONTACTS` to fetch all contacts
     - Send `CMD_GET_CHANNEL` multiple times to fetch all channel slots
