@@ -786,13 +786,13 @@ After this bootloader is flashed onto the device, you can trigger an over-the-ai
 
 **A:** For ESP32-based devices (e.g. Heltec V3):
 
-1. On <https://flasher.meshcore.io>, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name)
-2. From the MeshCore app, log in remotely to the repeater you want to update with admin privileges
+1. On <https://flasher.meshcore.io>, download the **non-merged** version of the firmware for your ESP32 device (e.g. `Heltec_v3_repeater-v1.6.2-4449fd3.bin`, no `"merged"` in the file name).
+2. From the MeshCore app, log in remotely to the repeater you want to update with admin privileges.
 3. Go to the Command Line tab, type `start ota` and hit enter.
-4. you should see `OK` to confirm the repeater device is now in OTA mode
-5. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`
-6. From your phone or computer connect to the 'MeshCore OTA' hotspot
-7. From a browser, go to <http://192.168.4.1/update> and upload the non-merged bin from the flasher
+4. You should see `OK` to confirm the repeater device is now in OTA mode.
+5. The command `start ota` on an ESP32-based device starts a Wi-Fi hotspot named `MeshCore OTA`.
+6. From your phone or computer connect to the 'MeshCore OTA' hotspot.
+7. From a browser, go to <http://192.168.4.1/update> and upload the non-merged bin from the flasher.
 
 
 ### 7.3. Q: Is there a way to lower the chance of a failed OTA device firmware update (DFU)?
