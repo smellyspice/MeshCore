@@ -91,10 +91,10 @@ A list of frequently-asked questions and answers for MeshCore
 **A:** MeshCore is a multi-platform system for enabling secure text-based communications utilizing LoRa radio hardware. It can be used for Off-Grid Communication, Emergency Response & Disaster Recovery, Outdoor Activities, Tactical Security including law enforcement and private security and also IoT sensor networks. ([source](https://meshcore.io/))
 
 MeshCore is free and open source:
-* MeshCore is the routing and firmware etc., available on GitHub under MIT license
-* There are clients made by the community, such as the web clients, these are free to use, and some are open source too
-* The cross-platform mobile app developed by [Liam Cottle](https://liamcottle.net) for Android/iOS/PC etc. is free to download and use
-* The T-Deck firmware is developed by Scott at Ripple Radios, the creator of MeshCore, is also free to flash on your devices and use
+- MeshCore is the routing and firmware etc., available on GitHub under MIT license
+- There are clients made by the community, such as the web clients, these are free to use, and some are open source too
+- The cross-platform mobile app developed by [Liam Cottle](https://liamcottle.net) for Android/iOS/PC etc. is free to download and use
+- The T-Deck firmware is developed by Scott at Ripple Radios, the creator of MeshCore, is also free to flash on your devices and use
 
 
 Some more advanced, but optional features are available on T-Deck if you register your device for a key to unlock. On the MeshCore smartphone clients for Android and iOS/iPadOS, you can unlock the wait timer for repeater and room server remote management over RF feature.
