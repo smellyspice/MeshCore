@@ -699,8 +699,8 @@ void UITask::loop() {
         _display->drawRect(p, y, _display->width() - p*2, y);
         _display->drawTextCentered(_display->width() / 2, y + p*3, _alert);
         _next_refresh = _alert_expiry;   // will need refresh when alert is dismissed
-      } 
-      
+      }
+
       _display->endFrame();
     }
 #if AUTO_OFF_MILLIS > 0
@@ -762,7 +762,7 @@ char UITask::handleLongPress(char c) {
 }
 
 char UITask::handleDoubleClick(char c) {
-  MESH_DEBUG_PRINTLN("UITask: double click triggered");
+  MESH_DEBUG_PRINTLN("UITask: double-click triggered");
   checkDisplayOn(c);
   return c;
 }
