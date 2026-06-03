@@ -9,6 +9,7 @@ protected:
   mesh::MainBoard* _board;
   uint32_t n_recv, n_sent, n_recv_errors;
   int16_t _noise_floor, _threshold;
+  bool _cad_enabled;
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
   uint8_t _preamble_sf;
@@ -50,6 +51,7 @@ public:
 
   int getNoiseFloor() const override { return _noise_floor; }
   void triggerNoiseFloorCalibrate(int threshold) override;
+  void setCADEnabled(bool enable) override { _cad_enabled = enable; }
   void resetAGC() override;
 
   void loop() override;
