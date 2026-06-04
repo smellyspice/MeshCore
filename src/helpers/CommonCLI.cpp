@@ -433,11 +433,11 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
 #if defined(NRF52_PLATFORM)
       _prefs->powersaving_enabled = 1;
       savePrefs();
-      strcpy(reply, "On - Immediate effect");
+      strcpy(reply, "on - Immediate effect");
 #elif defined(ESP32) && !defined(WITH_BRIDGE)
       _prefs->powersaving_enabled = 1;
       savePrefs();
-      strcpy(reply, "On - After 2 minutes");
+      strcpy(reply, "on - After 2 minutes");
 #elif defined(WITH_BRIDGE)
       strcpy(reply, "Bridge not supported");
 #else
@@ -446,12 +446,12 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
     } else if (memcmp(command, "powersaving off", 15) == 0) {
       _prefs->powersaving_enabled = 0;
       savePrefs();
-      strcpy(reply, "Off");
+      strcpy(reply, "off");
     } else if (memcmp(command, "powersaving", 11) == 0) {
       if (_prefs->powersaving_enabled) {
-        strcpy(reply, "On");
+        strcpy(reply, "on");
       } else {
-        strcpy(reply, "Off");
+        strcpy(reply, "off");
       }
     } else if (memcmp(command, "log start", 9) == 0) {
       _callbacks->setLoggingOn(true);
