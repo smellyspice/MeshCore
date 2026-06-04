@@ -1536,6 +1536,15 @@ void MyMesh::handleCmdFrame(size_t len) {
   } else if (cmd_frame[0] == CMD_SEND_ANON_REQ && len > 1 + PUB_KEY_SIZE) {
     uint8_t *pub_key = &cmd_frame[1];
     ContactInfo *recipient = lookupContactByPubKey(pub_key, PUB_KEY_SIZE);
+    ContactInfo anon;
+    if (recipient == NULL) { // FIRMWARE_VER_CODE 13+,  allow non-contact requests
+      memset(&anon, 0, sizeof(anon));
+      memcpy(anon.id.pub_key, pub_key, PUB_KEY_SIZE);
+      anon.out_path_len = 0;   // default to zero-hop direct
+      anon.type = ADV_TYPE_NONE;  // unknown
+
+      if (addContact(anon)) recipient = &anon;
+    }
     uint8_t *data = &cmd_frame[1 + PUB_KEY_SIZE];
     if (recipient) {
       uint32_t tag, est_timeout;
@@ -1552,7 +1561,7 @@ void MyMesh::handleCmdFrame(size_t len) {
         _serial->writeFrame(out_frame, 10);
       }
     } else {
-      writeErrFrame(ERR_CODE_NOT_FOUND); // contact not found
+      writeErrFrame(ERR_CODE_TABLE_FULL); // contacts full
     }
   } else if (cmd_frame[0] == CMD_SEND_STATUS_REQ && len >= 1 + PUB_KEY_SIZE) {
     uint8_t *pub_key = &cmd_frame[1];
@@ -1983,6 +1992,14 @@ void MyMesh::handleCmdFrame(size_t len) {
   }
 }
 
+static bool save_filter(const ContactInfo& c) {
+  return c.type != ADV_TYPE_NONE;   // don't save the transient/anon entries
+}
+
+void MyMesh::saveContacts() {
+  _store->saveContacts(this, save_filter);
+}
+
 void MyMesh::enterCLIRescue() {
   _cli_rescue = true;
   cli_command[0] = 0;
@@ -2169,7 +2186,15 @@ void MyMesh::checkSerialInterface() {
              && !_serial->isWriteBusy() // don't spam the Serial Interface too quickly!
   ) {
     ContactInfo contact;
-    if (_iter.hasNext(this, contact)) {
+    bool found = false;
+    while (_iter.hasNext(this, contact)) {
+      if (contact.type != ADV_TYPE_NONE) {
+        found = true;
+        break;
+      }
+    }
+
+    if (found) {
       if (contact.lastmod > _iter_filter_since) { // apply the 'since' filter
         writeContactRespFrame(RESP_CODE_CONTACT, contact);
         if (contact.lastmod > _most_recent_lastmod) {
