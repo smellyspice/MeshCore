@@ -11,8 +11,8 @@
 #define NUM_ANALOG_OUTPUTS (0)
 
 #define WIRE_INTERFACES_COUNT (1)
-#define PIN_WIRE_SDA (0 + 11)
-#define PIN_WIRE_SCL (0 + 12)
+#define PIN_WIRE_SDA (0 + 30)
+#define PIN_WIRE_SCL (0 + 5)
 #define PIN_BOARD_SDA PIN_WIRE_SDA
 #define PIN_BOARD_SCL PIN_WIRE_SCL
 
@@ -51,6 +51,13 @@
 #define P_LORA_MISO  PIN_SPI_MISO
 #define P_LORA_MOSI  PIN_SPI_MOSI
 #define P_LORA_SCLK  PIN_SPI_SCK
+
+#define USE_KCT8103L_PA_ONLY
+#define LORA_KCT8103L_EN      (0 + 15)
+#define LORA_KCT8103L_TX_RX   (0 + 16)
+#define LORA_PA_POWER         LORA_KCT8103L_EN
+#define RF_PA_DETECT_PIN      (0 + 13)
+#define RF_PA_HIGH_POWER_VALUE HIGH
 
 #define GPS_L76K
 #define GPS_RESET_MODE LOW

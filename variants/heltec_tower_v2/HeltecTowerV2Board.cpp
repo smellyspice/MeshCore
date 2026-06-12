@@ -19,6 +19,7 @@ void HeltecTowerV2Board::initiateShutdown(uint8_t reason) {
   digitalWrite(PIN_GPS_STANDBY, LOW);
   pinMode(PIN_GPS_RESET, OUTPUT);
   digitalWrite(PIN_GPS_RESET, GPS_RESET_MODE);
+  loRaFEMControl.setSleepModeEnable();
 
   bool enable_lpcomp = (reason == SHUTDOWN_REASON_LOW_VOLTAGE ||
                         reason == SHUTDOWN_REASON_BOOT_PROTECT);
@@ -37,10 +38,8 @@ void HeltecTowerV2Board::initiateShutdown(uint8_t reason) {
 void HeltecTowerV2Board::begin() {
   NRF52Board::begin();
 
-#ifdef P_LORA_TX_LED
   pinMode(P_LORA_TX_LED, OUTPUT);
   digitalWrite(P_LORA_TX_LED, !LED_STATE_ON);
-#endif
 
   pinMode(PIN_BAT_CTL, OUTPUT);
   digitalWrite(PIN_BAT_CTL, LOW);
@@ -58,17 +57,18 @@ void HeltecTowerV2Board::begin() {
   digitalWrite(PIN_GPS_RESET, GPS_RESET_MODE);
   pinMode(PIN_GPS_STANDBY, OUTPUT);
   digitalWrite(PIN_GPS_STANDBY, HIGH);
+  loRaFEMControl.init();
 }
 
-#ifdef P_LORA_TX_LED
 void HeltecTowerV2Board::onBeforeTransmit() {
   digitalWrite(P_LORA_TX_LED, LED_STATE_ON);
+  loRaFEMControl.setTxModeEnable();
 }
 
 void HeltecTowerV2Board::onAfterTransmit() {
   digitalWrite(P_LORA_TX_LED, !LED_STATE_ON);
+  loRaFEMControl.setRxModeEnable();
 }
-#endif
 
 uint16_t HeltecTowerV2Board::getBattMilliVolts() {
   analogReadResolution(12);
@@ -95,6 +95,7 @@ void HeltecTowerV2Board::powerOff() {
   digitalWrite(PIN_GPS_STANDBY, LOW);
   pinMode(PIN_GPS_RESET, OUTPUT);
   digitalWrite(PIN_GPS_RESET, GPS_RESET_MODE);
+  loRaFEMControl.setSleepModeEnable();
   pinMode(PIN_BAT_CTL, OUTPUT);
   digitalWrite(PIN_BAT_CTL, LOW);
   variant_shutdown();

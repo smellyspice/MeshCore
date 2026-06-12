@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <MeshCore.h>
 #include <helpers/NRF52Board.h>
+#include "LoRaFEMControl.h"
 
 class HeltecTowerV2Board : public NRF52BoardDCDC {
 protected:
@@ -11,12 +12,12 @@ protected:
 #endif
 
 public:
+  LoRaFEMControl loRaFEMControl;
+
   HeltecTowerV2Board() : NRF52Board("TOWER_V2_OTA") {}
   void begin();
-#ifdef P_LORA_TX_LED
   void onBeforeTransmit() override;
   void onAfterTransmit() override;
-#endif
   uint16_t getBattMilliVolts() override;
   const char* getManufacturerName() const override;
   void powerOff() override;
