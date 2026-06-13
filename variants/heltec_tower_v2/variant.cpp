@@ -25,6 +25,8 @@ void variant_shutdown()
   nrf_gpio_cfg_default(PIN_GPS_STANDBY);
   nrf_gpio_cfg_default(GPS_RX_PIN);
   nrf_gpio_cfg_default(GPS_TX_PIN);
+  pinMode(LORA_KCT8103L_EN, OUTPUT);
+  digitalWrite(LORA_KCT8103L_EN, LOW);
   nrf_gpio_cfg_default(LORA_KCT8103L_TX_RX);
   nrf_gpio_cfg_default(RF_PA_DETECT_PIN);
   nrf_gpio_cfg_default(SX126X_CS);
