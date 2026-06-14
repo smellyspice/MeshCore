@@ -1542,6 +1542,7 @@ void MyMesh::handleCmdFrame(size_t len) {
       memcpy(anon.id.pub_key, pub_key, PUB_KEY_SIZE);
       anon.out_path_len = 0;   // default to zero-hop direct
       anon.type = ADV_TYPE_NONE;  // unknown
+      anon.lastmod = getRTCClock()->getCurrentTime();
 
       if (addContact(anon)) recipient = &anon;
     }
