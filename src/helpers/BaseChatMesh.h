@@ -172,7 +172,8 @@ public:
   ContactInfo* lookupContactByPubKey(const uint8_t* pub_key, int prefix_len);
   bool  removeContact(ContactInfo& contact);
   bool  addContact(const ContactInfo& contact);
-  int getNumContacts() const { return num_contacts; }
+  int getTotalContactSlots() const { return num_contacts; }
+  int getNumContacts() const { return num_contacts - MAX_ANON_CONTACTS; }  // don't include the reserved slots at start
   bool getContactByIdx(uint32_t idx, ContactInfo& contact);
   ContactsIterator startContactsIterator();
   ChannelDetails* addChannel(const char* name, const char* psk_base64);
