@@ -68,29 +68,36 @@ void BaseChatMesh::bootstrapRTCfromContacts() {
 }
 
 ContactInfo* BaseChatMesh::allocateContactSlot(bool transient_only) {
-  if (num_contacts < MAX_CONTACTS) {
-    return &contacts[num_contacts++];
-  } else if (transient_only || shouldOverwriteWhenFull()) {
-    // Find oldest non-favourite contact by oldest lastmod timestamp
-    int oldest_idx = -1;
-    uint32_t oldest_lastmod = 0xFFFFFFFF;
-    for (int i = 0; i < num_contacts; i++) {
-      if (transient_only) {
-        if (contacts[i].type == ADV_TYPE_NONE && contacts[i].lastmod < oldest_lastmod) {
-          oldest_lastmod = contacts[i].lastmod;
-          oldest_idx = i;
-        }
-      } else {
+  int oldest_idx = -1;
+  uint32_t oldest_lastmod = 0xFFFFFFFF;
+  if (transient_only) {
+    // only allocate from first N
+    for (int i = 0; i < MAX_ANON_CONTACTS; i++) {
+      if (contacts[i].type == ADV_TYPE_NONE && contacts[i].lastmod < oldest_lastmod) {
+        oldest_lastmod = contacts[i].lastmod;
+        oldest_idx = i;
+      }
+    }
+    if (oldest_idx >= 0) {
+      // NOTE: do NOT call onContactOverwrite()
+      return &contacts[oldest_idx];
+    }
+  } else {
+    if (num_contacts < MAX_ANON_CONTACTS+MAX_CONTACTS) {
+      return &contacts[num_contacts++];
+    } else if (shouldOverwriteWhenFull()) {
+      // Find oldest non-favourite contact by oldest lastmod timestamp
+      for (int i = MAX_ANON_CONTACTS; i < num_contacts; i++) {
         bool is_favourite = (contacts[i].flags & 0x01) != 0;
-        if (!is_favourite && contacts[i].lastmod < oldest_lastmod && contacts[i].type != ADV_TYPE_NONE) {
+        if (!is_favourite && contacts[i].lastmod < oldest_lastmod) {
           oldest_lastmod = contacts[i].lastmod;
           oldest_idx = i;
         }
       }
-    }
-    if (oldest_idx >= 0) {
-      onContactOverwrite(contacts[oldest_idx].id.pub_key);
-      return &contacts[oldest_idx];
+      if (oldest_idx >= 0) {
+        onContactOverwrite(contacts[oldest_idx].id.pub_key);
+        return &contacts[oldest_idx];
+      }
     }
   }
   return NULL; // no space, no overwrite or all contacts are all favourites
@@ -930,7 +937,7 @@ bool BaseChatMesh::getContactByIdx(uint32_t idx, ContactInfo& contact) {
 }
 
 ContactsIterator BaseChatMesh::startContactsIterator() {
-  return ContactsIterator();
+  return ContactsIterator(MAX_ANON_CONTACTS);   // start at offset, skip the anon entries
 }
 
 bool ContactsIterator::hasNext(const BaseChatMesh* mesh, ContactInfo& dest) {
