@@ -11,7 +11,17 @@ bool SH1106Display::i2c_probe(TwoWire &wire, uint8_t addr)
 
 bool SH1106Display::begin()
 {
-  return display.begin(DISPLAY_ADDRESS, true) && i2c_probe(Wire, DISPLAY_ADDRESS);
+  // Address selection: on some board revisions (notably the LilyGo T-Beam
+  // Supreme V3) the OLED lives at 0x3D because 0x3C is occupied by a
+  // magnetometer (QMC6310N). 0x3D is only ever used by the OLED, so prefer it
+  // when present, otherwise fall back to the standard 0x3C (DISPLAY_ADDRESS).
+  uint8_t addr = 0;
+  if (i2c_probe(Wire, 0x3D)) {
+    addr = 0x3D;
+  } else if (i2c_probe(Wire, DISPLAY_ADDRESS)) {
+    addr = DISPLAY_ADDRESS;
+  }
+  return addr && display.begin(addr, true);
 }
 
 void SH1106Display::turnOn()
