@@ -252,6 +252,6 @@ public:
   // To check if there is pending work
   bool hasPendingWork() const;
 
-  void setRxBoostedGain(bool enable) override;
+  bool setRxBoostedGain(bool enable) override;
 
 };
