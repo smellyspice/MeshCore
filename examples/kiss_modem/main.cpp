@@ -113,11 +113,9 @@ void setup() {
   uint32_t start = millis();
   while (!Serial && millis() - start < 3000) delay(10);
   delay(100);
-#if defined(ESP32)
+#if defined(ESP32) && ARDUINO_USB_MODE
   Serial.setTxTimeoutMs(USB_TX_TIMEOUT_MS);
-#if ARDUINO_USB_MODE
   Serial.setTxBufferSize(USB_TX_BUFFER_SIZE);
-#endif
 #endif
   modem = new KissModem(Serial, identity, rng, radio_driver, board, sensors);
 #endif
