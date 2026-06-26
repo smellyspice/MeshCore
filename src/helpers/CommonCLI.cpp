@@ -573,13 +573,13 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     strcpy(reply, _prefs->disable_fwd ? "OK - repeat is now OFF" : "OK - repeat is now ON");
   } else if (memcmp(config, "radio.rxgain ", 13) == 0) {
     bool enabled = memcmp(&config[13], "on", 2) == 0;
+    _prefs->rx_boosted_gain = enabled;
+    savePrefs();
     if (_callbacks->setRxBoostedGain(enabled)) {
-      _prefs->rx_boosted_gain = enabled;
       strcpy(reply, "OK");
-      savePrefs();
     } else {
-      strcpy(reply, "Error: unsupported or rejected");
-    }    
+      strcpy(reply, "Error: unsupported");
+    }
   } else if (memcmp(config, "radio.fem.rxgain ", 17) == 0) {
     if (!_board->canControlLoRaFemLna()) {
       strcpy(reply, "Error: unsupported");
