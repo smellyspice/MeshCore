@@ -20,8 +20,7 @@ void halt() {
 static char command[160];
 
 // For power saving
-unsigned long lastActive = 0; // mark last active time
-unsigned long nextSleepinSecs = 120; // next sleep in seconds. The first sleep (if enabled) is after 2 minutes from boot
+unsigned long POWERSAVING_FIRSTSLEEP_SECS = 120; // The first sleep (if enabled) from boot
 
 #if defined(PIN_USER_BTN) && defined(_SEEED_SENSECAP_SOLAR_H_)
 static unsigned long userBtnDownAt = 0;
@@ -43,9 +42,6 @@ void setup() {
   // boot debug messages can be seen on terminal
   delay(5000);
 #endif
-
-  // For power saving
-  lastActive = millis(); // mark last active time since boot
 
 #ifdef DISPLAY_CLASS
   if (display.begin()) {
@@ -107,6 +103,8 @@ void setup() {
 #if ENABLE_ADVERT_ON_BOOT == 1
   the_mesh.sendSelfAdvertisement(16000, false);
 #endif
+
+  board.onBootComplete();
 }
 
 void loop() {
@@ -162,27 +160,14 @@ void loop() {
   external_watchdog.loop();
 #endif
   if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
-#if defined(NRF52_PLATFORM)
 #ifdef HAS_EXTERNAL_WATCHDOG
     external_watchdog.feed();
-    uint32_t sleep_interval = external_watchdog.getIntervalMs() / 1000;
-    board.sleep((sleep_interval > 1800) ? 1800 : sleep_interval); // nrf ignores seconds param, sleeps whenever possible
-#else
-    board.sleep(1800); // nrf ignores seconds param, sleeps whenever possible
 #endif
+#if defined(NRF52_PLATFORM)
+    board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else
-    if (the_mesh.millisHasNowPassed(lastActive + nextSleepinSecs * 1000)) { // To check if it is time to sleep
-#ifdef HAS_EXTERNAL_WATCHDOG
-      external_watchdog.feed();
-      uint32_t sleep_interval = external_watchdog.getIntervalMs() / 1000;
-      board.sleep((sleep_interval > 1800) ? 1800 : sleep_interval);             // To sleep. Wake up after 30 minutes or when receiving a LoRa packet
-#else
-      board.sleep(1800);             // To sleep. Wake up after 30 minutes or when receiving a LoRa packet
-#endif
-      lastActive = millis();
-      nextSleepinSecs = 5;  // Default: To work for 5s and sleep again
-    } else {
-      nextSleepinSecs += 5; // When there is pending work, to work another 5s
+    if (the_mesh.millisHasNowPassed(POWERSAVING_FIRSTSLEEP_SECS * 1000)) { // To check if it is time to sleep
+      board.sleep(30); // Sleep. Wake up after a while or when receiving a LoRa packet
     }
 #endif
   }
