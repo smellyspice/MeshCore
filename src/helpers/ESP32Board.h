@@ -14,6 +14,7 @@
 #include <Wire.h>
 #include "soc/rtc.h"
 #include "esp_system.h"
+#include <driver/rtc_io.h>
 
 class ESP32Board : public mesh::MainBoard {
 protected:
