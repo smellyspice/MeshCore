@@ -298,7 +298,7 @@ float NRF52Board::getMCUTemperature() {
   return temp * 0.25f; // Convert to *C
 }
 
-void NRF52Board::powerOff() {
+void NRF52Board::shutdownPeripherals() {
   // Power off the display if any
 #ifdef DISPLAY_CLASS
   display.turnOff();
@@ -318,6 +318,10 @@ void NRF52Board::powerOff() {
   // Flush serial buffers
   Serial.flush();
   delay(100);
+}
+
+void NRF52Board::powerOff() {
+  shutdownPeripherals();
 
   // Enter SYSTEMOFF
   uint8_t sd_enabled = 0;
