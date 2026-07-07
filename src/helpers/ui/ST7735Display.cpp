@@ -168,11 +168,11 @@ static const uint8_t PROGMEM
       255 },                        //     255 = max (500 ms) delay
 
   Rcmd1[] = {                       // 7735R init, part 1 (red or green tab)
-    15,                             // 15 commands in list:
-    ST77XX_SWRESET,   ST_CMD_DELAY, //  1: Software reset, 0 args, w/delay
-      150,                          //     150 ms delay
+    14,                             // 14 commands in list:
+    /*ST77XX_SWRESET,   ST_CMD_DELAY, //  1: Software reset, 0 args, w/delay
+      150,  */                        //     150 ms delay
     ST77XX_SLPOUT,    ST_CMD_DELAY, //  2: Out of sleep mode, 0 args, w/delay
-      255,                          //     500 ms delay
+      120,                          //     120 ms delay
     ST7735_FRMCTR1, 3,              //  3: Framerate ctrl - normal mode, 3 arg:
       0x01, 0x2C, 0x2D,             //     Rate = fosc/(1x2+40) * (LINE+2C+2D)
     ST7735_FRMCTR2, 3,              //  4: Framerate ctrl - idle mode, 3 args:
@@ -251,7 +251,7 @@ static const uint8_t PROGMEM
       0x00, 0x9F },                 //     XEND = 159
 
   Rcmd3[] = {                       // 7735R init, part 3 (red or green tab)
-    4,                              //  4 commands in list:
+    2,                              //  2 commands in list:
     ST7735_GMCTRP1, 16      ,       //  1: Gamma Adjustments (pos. polarity), 16 args + delay:
       0x02, 0x1c, 0x07, 0x12,       //     (Not entirely necessary, but provides
       0x37, 0x32, 0x29, 0x2d,       //      accurate colors)
@@ -261,11 +261,7 @@ static const uint8_t PROGMEM
       0x03, 0x1d, 0x07, 0x06,       //     (Not entirely necessary, but provides
       0x2E, 0x2C, 0x29, 0x2D,       //      accurate colors)
       0x2E, 0x2E, 0x37, 0x3F,
-      0x00, 0x00, 0x02, 0x10,
-    ST77XX_NORON,     ST_CMD_DELAY, //  3: Normal display on, no args, w/delay
-      10,                           //     10 ms delay
-    ST77XX_DISPON,    ST_CMD_DELAY, //  4: Main screen turn on, no args w/delay
-      100 };                        //     100 ms delay
+      0x00, 0x00, 0x02, 0x10 };                        //     100 ms delay
 
 static int16_t _xstart = 0;          ///< Internal framebuffer X offset
 static int16_t _ystart = 0;          ///< Internal framebuffer Y offset
@@ -413,20 +409,30 @@ bool ST7735Display::i2c_probe(TwoWire& wire, uint8_t addr) {
 #endif
 
 bool ST7735Display::begin() {
+  if (!sprite) {
+    // alloc offscreen canvas
+    sprite = new TFT_eSprite(&lcd);
+    if (sprite) {
+      if (sprite->createSprite(160, 80)) {
+        sprite->fillScreen(ST77XX_BLACK);
+        sprite->setTextColor(curr_color = ST77XX_WHITE);
+      } else {
+        Serial.printf("ST7735Display: failed to alloc canvas pixels");
+      }
+    } else {
+      Serial.printf("ST7735Display: failed to alloc canvas");
+    }
+  }
+  
   if (!_isOn) {
     if (_peripher_power) _peripher_power->claim();
 
-    delay(3000); // TEMP!!
+    delay(100); // TEMP!!
     pinMode(PIN_TFT_RST, OUTPUT);
     pinMode(PIN_TFT_CS, OUTPUT);
     pinMode(PIN_TFT_DC, OUTPUT);
+    pinMode(PIN_TFT_LEDA_CTL, OUTPUT);
 
-    // Pulse Reset low for 10ms
-    digitalWrite(PIN_TFT_RST, HIGH);
-    delay(1);
-    digitalWrite(PIN_TFT_RST, LOW);
-    delay(10);
-    digitalWrite(PIN_TFT_RST, HIGH);
 #ifdef ESP_PLATFORM
     _spi->begin(_clk,_miso,_mosi,-1);
 #else
@@ -434,55 +440,56 @@ bool ST7735Display::begin() {
 #endif
     _spi->setClockDivider(SPI_CLOCK_DIV2);
 
-    pinMode(PIN_TFT_LEDA_CTL, OUTPUT);
-    digitalWrite(PIN_TFT_LEDA_CTL, PIN_TFT_LEDA_CTL_ACTIVE);
-    digitalWrite(PIN_TFT_RST, HIGH);
-
-    displayInit(Rcmd1);
-
     _height = 80;
     _width = 160;
     _colstart = 24;
     _rowstart = 0;
 
-#if defined(HELTEC_TRACKER_V2) || defined(HELTEC_T096)
-    displayInit(Rcmd2green160x80);
-    //uint8_t madctl = ST77XX_MADCTL_MY | ST77XX_MADCTL_MV |ST7735_MADCTL_BGR;//Adjust color to BGR
-    //display.sendCommand(ST77XX_MADCTL, &madctl, 1);
-#endif
-
-    displayInit(Rcmd3);
-
-    setRotation(DISPLAY_ROTATION);
-
+    _resetAndInit();
+    
     sendCommand(ST77XX_DISPON);
-
-    if (!sprite) {
-      // alloc offscreen canvas
-      sprite = new TFT_eSprite(&lcd);
-      if (sprite) {
-        if (sprite->createSprite(160, 80)) {
-          sprite->fillScreen(ST77XX_BLACK);
-          sprite->setTextColor(curr_color = ST77XX_WHITE);
-        } else {
-          Serial.printf("ST7735Display: failed to alloc canvas pixels");
-        }
-      } else {
-        Serial.printf("ST7735Display: failed to alloc canvas");
-      }
-    }
     
     _isOn = true;
   }
   return true;
 }
 
+void ST7735Display::_resetAndInit() {
+    // Pulse Reset low for 10ms
+    digitalWrite(PIN_TFT_RST, HIGH);
+    delay(2);
+    digitalWrite(PIN_TFT_RST, LOW);
+    delay(10);
+    digitalWrite(PIN_TFT_RST, HIGH);
+    delay(2);
+
+    // run init commands
+    displayInit(Rcmd1);
+#if defined(HELTEC_TRACKER_V2) || defined(HELTEC_T096)
+    displayInit(Rcmd2green160x80);
+    //uint8_t madctl = ST77XX_MADCTL_MY | ST77XX_MADCTL_MV |ST7735_MADCTL_BGR;//Adjust color to BGR
+    //display.sendCommand(ST77XX_MADCTL, &madctl, 1);
+#endif
+    displayInit(Rcmd3);
+    setRotation(DISPLAY_ROTATION);
+    
+    // clear the buffer before display on
+    sprite->fillScreen(ST77XX_BLACK);
+    endFrame();
+    
+    // turn on backlight
+    digitalWrite(PIN_TFT_LEDA_CTL, PIN_TFT_LEDA_CTL_ACTIVE);
+
+}
+
 void ST7735Display::turnOn() {
   if (!_isOn) {
+    if (_peripher_power) _peripher_power->claim();
+    _resetAndInit();
     sendCommand(ST77XX_DISPON);
 
     // Now turn on the backlight
-    digitalWrite(PIN_TFT_LEDA_CTL, PIN_TFT_LEDA_CTL_ACTIVE);
+    // digitalWrite(PIN_TFT_LEDA_CTL, PIN_TFT_LEDA_CTL_ACTIVE);
     _isOn = true;
   }
 }
@@ -507,7 +514,7 @@ void ST7735Display::clear() {
 void ST7735Display::startFrame(Color bkg) {
   sprite->fillScreen(ST77XX_BLACK);
   sprite->setTextColor(curr_color = ST77XX_WHITE);
-  //sprite->setFreeFont(&FreeSans7pt7b);
+  sprite->setFreeFont();
   sprite->setTextSize(1);      // This one affects size of Please wait... message
   //sprite->cp437(true);         // Use full 256 char 'Code Page 437' font
 }
