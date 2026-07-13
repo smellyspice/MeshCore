@@ -102,7 +102,12 @@
 static TFT_eSPI lcd = TFT_eSPI(160, 80);
 static uint32_t curr_color;
 
-#define  _spi   (&SPI1)
+#if defined(HELTEC_LORA_V3) || defined(HELTEC_TRACKER_V2)
+  static SPIClass tft_spi(SPI3_HOST);
+  #define  _spi   (&tft_spi)
+#else
+  #define  _spi   (&SPI1)
+#endif
 
 SPISettings  _spiSettings = SPISettings(40000000, MSBFIRST, SPI_MODE0);
 
@@ -434,7 +439,7 @@ bool ST7735Display::begin() {
     pinMode(PIN_TFT_LEDA_CTL, OUTPUT);
 
 #ifdef ESP_PLATFORM
-    _spi->begin(_clk,_miso,_mosi,-1);
+    _spi->begin(PIN_TFT_SCL, -1 /* _miso */, PIN_TFT_SDA /* _mosi */, -1);
 #else
     _spi->begin(); 
 #endif
