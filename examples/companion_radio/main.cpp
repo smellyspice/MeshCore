@@ -118,6 +118,10 @@ void setup() {
   Serial.begin(115200);
   board.begin();
 
+#ifdef HAS_EXTERNAL_WATCHDOG
+  external_watchdog.begin();
+#endif
+
 #ifdef DISPLAY_CLASS
   DisplayDriver* disp = NULL;
   if (display.begin()) {
@@ -264,6 +268,9 @@ void loop() {
   ui_task.loop();
 #endif
   rtc_clock.tick();
+#ifdef HAS_EXTERNAL_WATCHDOG
+  external_watchdog.loop();
+#endif
 
 #ifdef ETHERNET_ENABLED
   serial_interface.loop();
