@@ -5,6 +5,7 @@
 #include <helpers/SensorManager.h>
 #include <helpers/ClientACL.h>
 #include <helpers/RegionMap.h>
+#include <helpers/ConfigSerializer.h>
 
 #if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
 #define WITH_BRIDGE
@@ -19,7 +20,9 @@
 #define LOOP_DETECT_MODERATE  2
 #define LOOP_DETECT_STRICT    3
 
-struct NodePrefs { // persisted to file
+class NodePrefs : public ConfigSerializer {
+public:
+  // in-memory backing data
   float airtime_factor;
   char node_name[32];
   double node_lat, node_lon;
@@ -65,6 +68,121 @@ struct NodePrefs { // persisted to file
   uint8_t path_hash_mode;   // which path mode to use when sending
   uint8_t loop_detect;
   uint8_t cad_enabled;      // hardware Channel Activity Detection before TX (boolean)
+
+private:
+  class RadioPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("freq", _parent->freq);
+      def("bw", _parent->bw);
+      def("sf", _parent->sf);
+      def("cr", _parent->cr);
+      def("cad", _parent->cad_enabled);
+      def("int_thr", _parent->interference_threshold);
+      def("rxgain", _parent->rx_boosted_gain);
+      def("fem_rxgain", _parent->rx_boosted_gain);
+      def("tx", _parent->tx_power_dbm);
+      def("af", _parent->airtime_factor);
+      def("rxdelay", _parent->rx_delay_base);
+      def("f_txdelay", _parent->tx_delay_factor);
+      def("d_txdelay", _parent->direct_tx_delay_factor);
+      def("agc_int", _parent->agc_reset_interval);
+      def("hash_mode", _parent->path_hash_mode);
+      def("multi_ack", _parent->multi_acks);
+    }
+  public:
+    RadioPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  RadioPrefs radio;
+
+  class BridgePrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("en", _parent->bridge_enabled); // boolean
+      def("delay", _parent->bridge_delay);  // milliseconds (default 500 ms)
+      def("src", _parent->bridge_pkt_src); // 0 = logTx, 1 = logRx (default logTx)
+      def("baud", _parent->bridge_baud);   // 9600, 19200, 38400, 57600, 115200 (default 115200)
+      def("ch", _parent->bridge_channel); // 1-14 (ESP-NOW only)
+      def("secret", _parent->bridge_secret, sizeof(_parent->bridge_secret)); // for XOR encryption of bridge packets (ESP-NOW only)
+    }
+  public:
+    BridgePrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  BridgePrefs bridge;
+
+  class GPSPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("en", _parent->gps_enabled); // boolean
+      def("int", _parent->gps_interval);   // interval in seconds
+      def("adv_loc", _parent->advert_loc_policy);
+    }
+  public:
+    GPSPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  GPSPrefs gps;
+
+  class PowerPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("adc_mult", _parent->adc_multiplier);
+      def("pwr_sav_en", _parent->powersaving_enabled);
+    }
+  public:
+    PowerPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  PowerPrefs power;
+
+  class RepeatPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("disable", _parent->disable_fwd);
+      def("f_max", _parent->flood_max);
+      def("f_max_uns", _parent->flood_max_unscoped);
+      def("f_max_adv", _parent->flood_max_advert);
+      def("loop", _parent->loop_detect);
+    }
+  public:
+    RepeatPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  RepeatPrefs repeat;
+
+  class RoomPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("rd_only", _parent->allow_read_only);
+    }
+  public:
+    RoomPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  RoomPrefs room;
+
+protected:
+  void structure() override {
+    def("name", node_name, sizeof(node_name));
+    def("pass", password, sizeof(password));
+    def("guest", guest_password, sizeof(guest_password));
+    def("owner", owner_info, sizeof(owner_info));
+    def("adv_int", advert_interval);
+    def("f_adv_int", flood_advert_interval);
+    def("lat", node_lat);
+    def("lon", node_lon);
+    def("radio", radio);
+    def("bridge", bridge);
+    def("gps", gps);
+    def("repeat", repeat);
+    def("room", room);
+    def("power", power);
+  }
+
+public:
+  NodePrefs() : ConfigSerializer(), bridge(this), gps(this), radio(this), power(this), repeat(this), room(this) { }
 };
 
 class CommonCLICallbacks {
@@ -139,7 +257,7 @@ public:
       : _board(&board), _rtc(&rtc), _sensors(&sensors), _region_map(&region_map), _acl(&acl), _prefs(prefs), _callbacks(callbacks) { }
 
   void loadPrefs(FILESYSTEM* _fs);
-  void savePrefs(FILESYSTEM* _fs);
+  bool savePrefs(FILESYSTEM* _fs);
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   uint8_t buildAdvertData(uint8_t node_type, uint8_t* app_data);
 };
