@@ -103,7 +103,7 @@ static TFT_eSPI lcd = TFT_eSPI(160, 80);
 static uint32_t curr_color;
 
 #if defined(HELTEC_LORA_V3) || defined(HELTEC_TRACKER_V2)
-  static SPIClass tft_spi(SPI3_HOST);
+  static SPIClass tft_spi(HSPI);
   #define  _spi   (&tft_spi)
 #else
   #define  _spi   (&SPI1)
