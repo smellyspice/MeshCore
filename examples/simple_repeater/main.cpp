@@ -160,9 +160,6 @@ void loop() {
   external_watchdog.loop();
 #endif
   if (the_mesh.getNodePrefs()->powersaving_enabled && !the_mesh.hasPendingWork()) {
-#ifdef HAS_EXTERNAL_WATCHDOG
-    external_watchdog.feed();
-#endif
 #if defined(NRF52_PLATFORM)
     board.sleep(0); // nrf ignores seconds param, sleeps whenever possible
 #else
