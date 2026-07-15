@@ -4,6 +4,9 @@
 #include <driver/rtc_io.h>
 #include <helpers/ESP32Board.h>
 #include <helpers/RefCountedDigitalPin.h>
+#if defined(UI_HAS_ROTARY_INPUT)
+#include <helpers/ui/RotaryInput.h>
+#endif
 
 #ifndef ADC_MULTIPLIER
   #define ADC_MULTIPLIER 4.9f
@@ -15,13 +18,13 @@ protected:
 
 public:
   RefCountedDigitalPin periph_power;
-  RefCountedDigitalPin vext_power;
 
-  HeltecRC32Board() :
-      periph_power(SENSOR_POWER_CTRL_PIN, SENSOR_POWER_ON),
-      vext_power(PIN_VEXT_EN, PIN_VEXT_EN_ACTIVE) { }
+  HeltecRC32Board() : periph_power(SENSOR_POWER_CTRL_PIN, SENSOR_POWER_ON){}
 
   void begin();
+#if defined(UI_HAS_ROTARY_INPUT)
+  RotaryInput& rotaryInput();
+#endif
   void onBeforeTransmit() override;
   void onAfterTransmit() override;
   void powerOff() override;

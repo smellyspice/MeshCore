@@ -22,9 +22,6 @@
 #define SENSOR_POWER_ON HIGH
 #define PERIPHERAL_WARMUP_MS 100
 
-#define VEXT_ENABLE 3
-#define VEXT_ON_VALUE HIGH
-
 #define USE_SX1262
 #define LORA_SCK 11
 #define LORA_MISO 13

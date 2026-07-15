@@ -10,6 +10,9 @@
 
 #ifdef DISPLAY_CLASS
 #include <helpers/ui/MomentaryButton.h>
+#if defined(UI_HAS_ROTARY_INPUT)
+#include <helpers/ui/RotaryInput.h>
+#endif
 #ifdef HELTEC_RC32_WITH_DISPLAY
 #include <helpers/ui/NV3001BDisplay.h>
 #else
@@ -25,6 +28,9 @@ extern EnvironmentSensorManager sensors;
 #ifdef DISPLAY_CLASS
   extern DISPLAY_CLASS display;
   extern MomentaryButton user_btn;
+#if defined(UI_HAS_ROTARY_INPUT)
+  extern RotaryInput& rotary_input;
+#endif
 #endif
 
 bool radio_init();
