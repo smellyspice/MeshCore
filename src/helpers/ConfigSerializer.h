@@ -2,8 +2,8 @@
 
 #include <Arduino.h>
 
-#ifndef CONFIF_MAX_DEPTH
-  #define CONFIF_MAX_DEPTH   8
+#ifndef CONFIG_MAX_DEPTH
+  #define CONFIG_MAX_DEPTH   8
 #endif
 
 #ifndef CONFIG_MAX_KEYLEN
@@ -27,7 +27,7 @@ class ConfigSerializer {
     uint8_t rd_mode;
     char pending;
     char rd_buf[CONFIG_MAX_TOKEN_LEN];
-    char _keys[CONFIF_MAX_DEPTH][CONFIG_MAX_KEYLEN];
+    char _keys[CONFIG_MAX_DEPTH][CONFIG_MAX_KEYLEN];
 
   public:
     bool success = true;

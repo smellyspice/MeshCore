@@ -97,10 +97,10 @@ int ConfigSerializer::Context::readNext() {
 bool ConfigSerializer::loadSerial(Stream& s) {
   Context context(&s, OP::READ);
   _context = &context;  // set the context for structure() call
-  // parse the Json file
-  uint8_t sp = 0;
+  uint8_t sp = 0;   // object nesting stack pointer
   int next_tok;
 
+  // parse the Json file
   while ((next_tok = context.readNext()) > TOK_EOF) {
     if (next_tok == TOK_KEY) {
       context.setKey(sp, context.getToken());
@@ -108,7 +108,7 @@ bool ConfigSerializer::loadSerial(Stream& s) {
       _depth = 1;  // re-run the structure() hierarchy again (looking for specific key, at specific depth)
       structure();
     } else if (next_tok == TOK_START_OBJ) {
-      if (sp < CONFIF_MAX_DEPTH - 1) {
+      if (sp < CONFIG_MAX_DEPTH - 1) {
         sp++;
       } else {
         Serial.printf("Error: max nesting reached"); // TODO: debug logging
@@ -145,7 +145,20 @@ void ConfigSerializer::def(const char* key, char* value, size_t max_len) {
     writeComma();
     _context->file()->print(key);
     _context->file()->print(":\"");
-    _context->file()->print(value);   // TODO: escape quotes
+    char c;
+    while ((c = *value++) != 0) {  // TODO: handle UTF-8 encoding
+      if (c == '"') {
+        _context->file()->print("\\\"");
+      } else if (c == '\\') {
+        _context->file()->print("\\\\");
+      } else if (c == '\n') {
+        _context->file()->print("\\n");
+      } else if (c == '\r') {
+        _context->file()->print("\\r");
+      } else {
+        _context->file()->print(c);
+      }
+    }
     _context->file()->print("\"");
   } else {
     if (_context->keyMatch(_depth, key)) {
@@ -233,12 +246,29 @@ void ConfigSerializer::def(const char* key, int8_t& value) {
   }
 }
 
+void ConfigSerializer::def(const char* key, bool& value) {
+  if (_context->op() == OP::WRITE) {
+    writeComma();
+    _context->file()->print(key);
+    _context->file()->print(":");
+    _context->file()->print(value ? "true" : "false");
+  } else {
+    if (_context->keyMatch(_depth, key)) {
+      value = strcmp(_context->getToken(), "true") == 0 || atoi(_context->getToken()) != 0;  // 'true' or a non-zero number
+    }
+  }  
+}
+
 void ConfigSerializer::def(const char* key, double& value) {
   if (_context->op() == OP::WRITE) {
     writeComma();
     _context->file()->print(key);
     _context->file()->print(":");
-    _context->file()->print(value, 6);  // REVISIT: how many dec places?
+    if (value == 0.0) {
+      _context->file()->print("0");  // shorter encoding
+    } else {
+      _context->file()->print(value, 6);  // REVISIT: how many dec places?
+    }
   } else {
     if (_context->keyMatch(_depth, key)) {
       value = atof(_context->getToken());
@@ -251,7 +281,11 @@ void ConfigSerializer::def(const char* key, float& value) {
     writeComma();
     _context->file()->print(key);
     _context->file()->print(":");
-    _context->file()->print(value, 4);  // REVISIT: how many dec places?
+    if (value == 0.0f) {
+      _context->file()->print("0");  // shorter encoding
+    } else {
+      _context->file()->print(value, 4);  // REVISIT: how many dec places?
+    }
   } else {
     if (_context->keyMatch(_depth, key)) {
       value = (float) atof(_context->getToken());
