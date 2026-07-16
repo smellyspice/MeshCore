@@ -55,6 +55,7 @@ void HeltecRC32Board::onAfterTransmit() {
 
 uint16_t HeltecRC32Board::getBattMilliVolts() {
   analogReadResolution(12);
+  analogSetAttenuation(ADC_2_5db);
   digitalWrite(PIN_ADC_CTRL, ADC_CTRL_ENABLED);
   delay(10);
   uint32_t raw = 0;
@@ -62,6 +63,7 @@ uint16_t HeltecRC32Board::getBattMilliVolts() {
     raw += analogReadMilliVolts(PIN_VBAT_READ);
   }
   raw = raw / 8;
+  digitalWrite(PIN_ADC_CTRL, !ADC_CTRL_ENABLED);
 
   return (adc_mult * raw);
 }
