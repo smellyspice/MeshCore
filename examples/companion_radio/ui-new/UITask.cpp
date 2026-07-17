@@ -747,6 +747,16 @@ void UITask::loop() {
     c = handleTripleClick(KEY_SELECT);
   }
 #endif
+#if defined(UI_HAS_ROTARY_INPUT)
+  RotaryInputEvent rotaryEv = rotary_input.poll();
+  if (c == 0 && _display != NULL && _display->isOn()) {
+    if (rotaryEv == RotaryInputEvent::Next) {
+      c = KEY_NEXT;
+    } else if (rotaryEv == RotaryInputEvent::Prev) {
+      c = KEY_PREV;
+    }
+  }
+#endif
 #if defined(PIN_USER_BTN_ANA)
   if (abs(millis() - _analogue_pin_read_millis) > 10) {
     int ev = analog_btn.check();
