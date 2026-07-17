@@ -1,14 +1,4 @@
 #include "HeltecRC32Board.h"
-#if defined(UI_HAS_ROTARY_INPUT)
-#include "HeltecRC32RotaryInput.h"
-#endif
-
-#if defined(UI_HAS_ROTARY_INPUT)
-RotaryInput& HeltecRC32Board::rotaryInput() {
-  static HeltecRC32RotaryInput input(&periph_power);
-  return input;
-}
-#endif
 
 void HeltecRC32Board::begin() {
   ESP32Board::begin();
