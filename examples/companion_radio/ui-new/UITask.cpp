@@ -751,12 +751,12 @@ void UITask::loop() {
   }
 #endif
 #if defined(UI_HAS_ROTARY_INPUT)
-  if (c == 0) {
-    RotaryInputEvent ev = rotary_input.poll();
-    if (ev == RotaryInputEvent::Next) {
-      c = checkDisplayOn(KEY_NEXT);
-    } else if (ev == RotaryInputEvent::Prev) {
-      c = checkDisplayOn(KEY_PREV);
+  RotaryInputEvent rotaryEv = rotary_input.poll();
+  if (c == 0 && _display != NULL && _display->isOn()) {
+    if (rotaryEv == RotaryInputEvent::Next) {
+      c = KEY_NEXT;
+    } else if (rotaryEv == RotaryInputEvent::Prev) {
+      c = KEY_PREV;
     }
   }
 #endif
