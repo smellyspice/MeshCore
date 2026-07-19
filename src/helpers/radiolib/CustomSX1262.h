@@ -137,7 +137,7 @@ class CustomSX1262 : public SX1262 {
       return false;
     }
 
-    PacketMillis setMaxPacketMillis(PacketMillis maxPacketMillis) {
+    void setMaxPacketMillis(PacketMillis maxPacketMillis) {
       MESH_DEBUG_PRINTLN("Setting _preambleMillis=%u, _maxPacketMillis=%u", maxPacketMillis.preambleMillis, maxPacketMillis.payloadMillis);
       _preambleMillis = maxPacketMillis.preambleMillis;
       _maxPayloadMillis = maxPacketMillis.payloadMillis;
