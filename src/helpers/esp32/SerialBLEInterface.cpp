@@ -103,10 +103,9 @@ void SerialBLEInterface::onMtuChanged(BLEServer* pServer, esp_ble_gatts_cb_param
 
 void SerialBLEInterface::onDisconnect(BLEServer* pServer) {
   BLE_DEBUG_PRINTLN("onDisconnect()");
+  deviceConnected = false;
   if (_isEnabled) {
     adv_restart_time = millis() + ADVERT_RESTART_DELAY;
-
-    // loop() will detect this on next loop, and set deviceConnected to false
   }
 }
 
@@ -214,8 +213,6 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
     }
     return len;
   }
-
-  if (pServer->getConnectedCount() == 0)  deviceConnected = false;
 
   if (deviceConnected != oldDeviceConnected) {
     if (!deviceConnected) {    // disconnecting
