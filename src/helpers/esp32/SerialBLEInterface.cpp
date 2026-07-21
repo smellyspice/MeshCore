@@ -208,7 +208,7 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
     }
   }
 
-  Frame frame = {};
+  Frame frame;
   if (xQueueReceive(recv_queue, &frame, 0) == pdTRUE) {
     memcpy(dest, frame.buf, frame.len);
     BLE_DEBUG_PRINTLN("readBytes: sz=%d, hdr=%d", (uint32_t) frame.len, (uint32_t) dest[0]);
