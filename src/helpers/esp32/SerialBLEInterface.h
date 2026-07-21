@@ -1,12 +1,12 @@
 #pragma once
 
 #include "../BaseSerialInterface.h"
-#include "../BoundedQueue.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLEServerCallbacks, BLECharacteristicCallbacks {
   BLEServer *pServer;
@@ -26,8 +26,9 @@ class SerialBLEInterface : public BaseSerialInterface, BLESecurityCallbacks, BLE
   };
 
   #define FRAME_QUEUE_SIZE  4
-  portMUX_TYPE recv_queue_mux = portMUX_INITIALIZER_UNLOCKED;
-  mesh::BoundedQueue<Frame, FRAME_QUEUE_SIZE> recv_queue;
+  StaticQueue_t recv_queue_state;
+  uint8_t recv_queue_storage[FRAME_QUEUE_SIZE * sizeof(Frame)];
+  QueueHandle_t recv_queue;
   int send_queue_len;
   Frame send_queue[FRAME_QUEUE_SIZE];
 
@@ -60,6 +61,9 @@ public:
     _isEnabled = false;
     _last_write = 0;
     last_conn_id = 0;
+    recv_queue = xQueueCreateStatic(
+      FRAME_QUEUE_SIZE, sizeof(Frame), recv_queue_storage, &recv_queue_state
+    );
     send_queue_len = 0;
   }
 

@@ -123,11 +123,7 @@ void SerialBLEInterface::onWrite(BLECharacteristic* pCharacteristic, esp_ble_gat
     frame.len = len;
     memcpy(frame.buf, rxValue, len);
 
-    portENTER_CRITICAL(&recv_queue_mux);
-    bool queued = recv_queue.push(frame);
-    portEXIT_CRITICAL(&recv_queue_mux);
-
-    if (!queued) {
+    if (xQueueSend(recv_queue, &frame, 0) != pdTRUE) {
       BLE_DEBUG_PRINTLN("ERROR: onWrite(), recv_queue is full!");
     }
   }
@@ -136,9 +132,7 @@ void SerialBLEInterface::onWrite(BLECharacteristic* pCharacteristic, esp_ble_gat
 // ---------- public methods
 
 void SerialBLEInterface::clearBuffers() {
-  portENTER_CRITICAL(&recv_queue_mux);
-  recv_queue.clear();
-  portEXIT_CRITICAL(&recv_queue_mux);
+  xQueueReset(recv_queue);
   send_queue_len = 0;
 }
 
@@ -216,11 +210,7 @@ size_t SerialBLEInterface::checkRecvFrame(uint8_t dest[]) {
   }
 
   Frame frame = {};
-  portENTER_CRITICAL(&recv_queue_mux);
-  bool received = recv_queue.pop(frame);
-  portEXIT_CRITICAL(&recv_queue_mux);
-
-  if (received) {
+  if (xQueueReceive(recv_queue, &frame, 0) == pdTRUE) {
     memcpy(dest, frame.buf, frame.len);
     BLE_DEBUG_PRINTLN("readBytes: sz=%d, hdr=%d", (uint32_t) frame.len, (uint32_t) dest[0]);
     return frame.len;
