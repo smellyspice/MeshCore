@@ -62,6 +62,10 @@
 #define CMD_SET_DEFAULT_FLOOD_SCOPE   63
 #define CMD_GET_DEFAULT_FLOOD_SCOPE   64
 #define CMD_SEND_RAW_PACKET           65
+#ifdef ESPNOW_BRIDGE_RADIO
+#define CMD_SET_BRIDGE_PARAMS         66
+#define CMD_GET_BRIDGE_PARAMS         67
+#endif
 
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
@@ -97,6 +101,9 @@
 #define RESP_ALLOWED_REPEAT_FREQ      26
 #define RESP_CODE_CHANNEL_DATA_RECV   27
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
+#ifdef ESPNOW_BRIDGE_RADIO
+#define RESP_CODE_BRIDGE_PARAMS       29
+#endif
 
 #define MAX_CHANNEL_DATA_LENGTH       (MAX_FRAME_SIZE - 9)
 
@@ -980,6 +987,17 @@ void MyMesh::begin(bool has_display) {
   board.setLoRaFemPaGainEnabled(_prefs.radio_fem_txgain);
   MESH_DEBUG_PRINTLN("RX Boosted Gain Mode: %s",
                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
+
+#ifdef ESPNOW_BRIDGE_RADIO
+  // radio_driver.init() (called before prefs were loaded) already applied the
+  // compile-time BRIDGE_CHANNEL/BRIDGE_SECRET defaults -- only override here
+  // if persisted prefs actually set something different.
+  if (_prefs.bridge_channel != 0 || _prefs.bridge_secret[0] != 0) {
+    radio_driver.setBridgeParams(
+      _prefs.bridge_channel != 0 ? _prefs.bridge_channel : BRIDGE_CHANNEL,
+      _prefs.bridge_secret[0] != 0 ? _prefs.bridge_secret : BRIDGE_SECRET);
+  }
+#endif
 }
 
 const char *MyMesh::getNodeName() {
@@ -1967,6 +1985,28 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       _serial->writeFrame(out_frame, 1);   // no name or key means null
     }
+#ifdef ESPNOW_BRIDGE_RADIO
+  } else if (cmd_frame[0] == CMD_SET_BRIDGE_PARAMS && len >= 1 + 1 + (int)sizeof(_prefs.bridge_secret)) {
+    uint8_t channel = cmd_frame[1];
+    if (channel == 0 || channel > 14) {
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
+    } else {
+      _prefs.bridge_channel = channel;
+      StrHelper::strncpy(_prefs.bridge_secret, (char *) &cmd_frame[2], sizeof(_prefs.bridge_secret));
+      savePrefs();
+      radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+      writeOKFrame();
+    }
+  } else if (cmd_frame[0] == CMD_GET_BRIDGE_PARAMS) {
+    out_frame[0] = RESP_CODE_BRIDGE_PARAMS;
+    out_frame[1] = _prefs.bridge_channel != 0 ? _prefs.bridge_channel : BRIDGE_CHANNEL;
+    if (_prefs.bridge_secret[0] != 0) {
+      memcpy(&out_frame[2], _prefs.bridge_secret, sizeof(_prefs.bridge_secret));
+    } else {
+      StrHelper::strncpy((char *) &out_frame[2], BRIDGE_SECRET, sizeof(_prefs.bridge_secret));
+    }
+    _serial->writeFrame(out_frame, 2 + sizeof(_prefs.bridge_secret));
+#endif
   } else if (cmd_frame[0] == CMD_SEND_CONTROL_DATA && len >= 2 && (cmd_frame[1] & 0x80) != 0) {
     auto resp = createControlData(&cmd_frame[1], len - 1);
     if (resp) {
