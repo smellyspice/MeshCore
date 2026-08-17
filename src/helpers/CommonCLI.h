@@ -7,7 +7,7 @@
 #include <helpers/RegionMap.h>
 #include <helpers/ConfigSerializer.h>
 
-#if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE)
+#if defined(WITH_RS232_BRIDGE) || defined(WITH_ESPNOW_BRIDGE) || defined(WITH_IP_BRIDGE)
 #define WITH_BRIDGE
 #endif
 
@@ -54,6 +54,14 @@ public:
   uint32_t bridge_baud = 0;   // 9600, 19200, 38400, 57600, 115200 (default 115200)
   uint8_t bridge_channel = 0; // 1-14 (ESP-NOW only)
   char bridge_secret[16]; // for XOR encryption of bridge packets (ESP-NOW only)
+  // WiFi STA settings (internet-bridge groundwork, see planning/ip-bridge-design.md)
+  char wifi_ssid[33];
+  char wifi_pwd[64];
+  // IpBridge settings: host empty = server/listen mode, host set = client
+  // (dials out to it). Secret is a DTLS-PSK pre-shared key, unrelated to bridge_secret.
+  char ip_host[64];
+  uint16_t ip_port = 0;
+  char ip_secret[32];
   // Power setting
   uint8_t powersaving_enabled = 0; // boolean
   // Gps settings
@@ -114,6 +122,31 @@ private:
     BridgePrefs(NodePrefs* parent) : _parent(parent) { }
   };
   BridgePrefs bridge;
+
+  class WifiPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("ssid", _parent->wifi_ssid, sizeof(_parent->wifi_ssid));
+      def("pwd", _parent->wifi_pwd, sizeof(_parent->wifi_pwd));
+    }
+  public:
+    WifiPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  WifiPrefs wifi;
+
+  class IpPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("host", _parent->ip_host, sizeof(_parent->ip_host)); // empty = server/listen mode
+      def("port", _parent->ip_port);
+      def("secret", _parent->ip_secret, sizeof(_parent->ip_secret)); // DTLS-PSK key
+    }
+  public:
+    IpPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  IpPrefs inet;
 
   class GPSPrefs : public ConfigSerializer {
     NodePrefs* _parent;
@@ -178,6 +211,8 @@ protected:
     def("lon", node_lon);
     def("radio", radio);
     def("bridge", bridge);
+    def("wifi", wifi);
+    def("inet", inet);
     def("gps", gps);
     def("repeat", repeat);
     def("room", room);
@@ -185,11 +220,15 @@ protected:
   }
 
 public:
-  NodePrefs() : ConfigSerializer(), bridge(this), gps(this), radio(this), power(this), repeat(this), room(this) {
+  NodePrefs() : ConfigSerializer(), bridge(this), wifi(this), inet(this), gps(this), radio(this), power(this), repeat(this), room(this) {
     node_name[0] = 0;
     password[0] = 0;
     guest_password[0] = 0;
     bridge_secret[0] = 0;
+    wifi_ssid[0] = 0;
+    wifi_pwd[0] = 0;
+    ip_host[0] = 0;
+    ip_secret[0] = 0;
     owner_info[0] = 0;
   }
 };

@@ -189,7 +189,7 @@ void setup() {
   bluetooth_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
   interface_manager.addInterface(InterfaceType::Bluetooth, &bluetooth_interface);
   #ifdef ESPNOW_BRIDGE_RADIO
-    radio_driver.relockChannel();  // BLE init can reset the WiFi PHY, desyncing it from BRIDGE_CHANNEL
+    radio_driver.relockChannel();  // BLE init can reset the WiFi PHY, desyncing it from the configured bridge channel
   #endif
 #endif
 

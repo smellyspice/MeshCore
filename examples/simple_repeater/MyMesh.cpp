@@ -872,6 +872,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 #if defined(WITH_ESPNOW_BRIDGE)
       , bridge(&_prefs, _mgr, &rtc)
 #endif
+#if defined(WITH_IP_BRIDGE)
+      , bridge(&_prefs, _mgr, &rtc)
+#endif
 {
   last_millis = 0;
   uptime_millis = 0;
@@ -978,6 +981,20 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
   radio_driver.setTxPower(_prefs.tx_power_dbm);
+
+#ifdef ESPNOW_BRIDGE_RADIO
+  // No compile-time BRIDGE_CHANNEL/BRIDGE_SECRET default -- radio_driver.init()
+  // (called before prefs were loaded) left the radio inert (no ESP-NOW peer
+  // registered). Only start it here once BOTH persisted prefs are actually
+  // set; a board with just one of the two configured stays inert rather than
+  // silently combining a real value with a placeholder for the other. Mirrors
+  // companion_radio/MyMesh.cpp's begin(). If WiFi STA is configured, the
+  // channel gets superseded again once it actually connects -- see main.cpp's
+  // ARDUINO_EVENT_WIFI_STA_GOT_IP handler (FR11 auto-derive refinement).
+  if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+  }
+#endif
 
   radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
   MESH_DEBUG_PRINTLN("RX Boosted Gain Mode: %s",

@@ -13,6 +13,16 @@
   #include <helpers/nrf52/EthernetCLI.h>
 #endif
 
+// WiFi STA uplink (internet-bridge groundwork -- see planning/ip-bridge-design.md).
+// Plain internet connectivity only, not the companion TCP protocol -- this board still
+// talks CLI over Serial/ESPNowBridgeRadio same as any other repeater. Credentials are
+// runtime-configurable only (CommonCLI 'set wifi.ssid'/'set wifi.pwd'), never build flags.
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  #include <WiFi.h>
+  bool wifi_needs_reconnect = false;
+  unsigned long last_wifi_reconnect_attempt = 0;
+#endif
+
 StdRNG fast_rng;
 SimpleMeshTables tables;
 
@@ -106,6 +116,46 @@ void setup() {
 
   the_mesh.begin(fs);
 
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  // wifi_ssid is only ever set via 'set wifi.ssid ...' over the CLI (CommonCLI) --
+  // never a build flag. Empty means WiFi STA is simply not configured yet.
+  if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0) {
+    board.setInhibitSleep(true);   // prevent sleep when WiFi is active
+    WiFi.setAutoReconnect(true);
+
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+            MESH_DEBUG_PRINTLN("WiFi disconnected. Flagging for reconnect...");
+            wifi_needs_reconnect = true;
+        } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+            MESH_DEBUG_PRINTLN("WiFi connected successfully!");
+            wifi_needs_reconnect = false;
+            // WiFi STA and ESP-NOW share one radio and MUST be on the same channel --
+            // the AP's channel is authoritative and non-negotiable once associated (see
+            // the old NOTE this replaced, and planning/ip-bridge-design.md FR7/FR11).
+            // Rather than requiring the AP to be pinned to a specific channel, just
+            // adopt whatever channel WiFi actually landed on for ESP-NOW too -- this is
+            // what actually keeps them in sync across different sites/APs without a
+            // reflash. No compile-time secret fallback: only push this if bridge.secret
+            // has actually been CLI-configured -- an unconfigured board must stay inert
+            // rather than have WiFi association silently arm ESP-NOW with a placeholder.
+            NodePrefs *prefs = the_mesh.getNodePrefs();
+            if (prefs->bridge_secret[0] != 0) {
+              radio_driver.setBridgeParams(WiFi.channel(), prefs->bridge_secret);
+            }
+        }
+    });
+
+    WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
+    // relockChannel() only recovers from the transient PHY reset BLE causes at
+    // association time -- it does NOT force the WiFi channel to any particular
+    // value (the AP's channel always wins once associated, and it's a no-op
+    // anyway if bridge.channel/bridge.secret haven't been configured yet).
+    // Actual channel sync happens above, in ARDUINO_EVENT_WIFI_STA_GOT_IP.
+    radio_driver.relockChannel();
+  }
+#endif
+
 #ifdef DISPLAY_CLASS
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif
@@ -190,6 +240,16 @@ void loop() {
 #ifdef DISPLAY_CLASS
   ui_task.loop();
 #endif
+
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  if (wifi_needs_reconnect && (millis() - last_wifi_reconnect_attempt > 10000)) {
+    MESH_DEBUG_PRINTLN("Attempting manual WiFi reconnect...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+    last_wifi_reconnect_attempt = millis();
+  }
+#endif
+
   rtc_clock.tick();
 
 #ifdef HAS_EXTERNAL_WATCHDOG

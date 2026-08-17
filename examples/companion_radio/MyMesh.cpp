@@ -989,13 +989,13 @@ void MyMesh::begin(bool has_display) {
                      radio_driver.getRxBoostedGainMode() ? "Enabled" : "Disabled");
 
 #ifdef ESPNOW_BRIDGE_RADIO
-  // radio_driver.init() (called before prefs were loaded) already applied the
-  // compile-time BRIDGE_CHANNEL/BRIDGE_SECRET defaults -- only override here
-  // if persisted prefs actually set something different.
-  if (_prefs.bridge_channel != 0 || _prefs.bridge_secret[0] != 0) {
-    radio_driver.setBridgeParams(
-      _prefs.bridge_channel != 0 ? _prefs.bridge_channel : BRIDGE_CHANNEL,
-      _prefs.bridge_secret[0] != 0 ? _prefs.bridge_secret : BRIDGE_SECRET);
+  // No compile-time BRIDGE_CHANNEL/BRIDGE_SECRET default -- radio_driver.init()
+  // (called before prefs were loaded) left the radio inert (no ESP-NOW peer
+  // registered). Only start it here once BOTH persisted prefs are actually
+  // set; a board with just one of the two configured stays inert rather than
+  // silently combining a real value with a placeholder for the other.
+  if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
   }
 #endif
 }
@@ -1998,13 +1998,12 @@ void MyMesh::handleCmdFrame(size_t len) {
       writeOKFrame();
     }
   } else if (cmd_frame[0] == CMD_GET_BRIDGE_PARAMS) {
+    // No compile-time fallback -- report the raw persisted values (0 / empty
+    // means "not configured yet") rather than substituting a placeholder, so
+    // the app can tell an unconfigured board apart from a configured one.
     out_frame[0] = RESP_CODE_BRIDGE_PARAMS;
-    out_frame[1] = _prefs.bridge_channel != 0 ? _prefs.bridge_channel : BRIDGE_CHANNEL;
-    if (_prefs.bridge_secret[0] != 0) {
-      memcpy(&out_frame[2], _prefs.bridge_secret, sizeof(_prefs.bridge_secret));
-    } else {
-      StrHelper::strncpy((char *) &out_frame[2], BRIDGE_SECRET, sizeof(_prefs.bridge_secret));
-    }
+    out_frame[1] = _prefs.bridge_channel;
+    memcpy(&out_frame[2], _prefs.bridge_secret, sizeof(_prefs.bridge_secret));
     _serial->writeFrame(out_frame, 2 + sizeof(_prefs.bridge_secret));
 #endif
   } else if (cmd_frame[0] == CMD_SEND_CONTROL_DATA && len >= 2 && (cmd_frame[1] & 0x80) != 0) {
