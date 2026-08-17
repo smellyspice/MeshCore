@@ -26,6 +26,26 @@ ESPNowBridge::ESPNowBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTC
   _instance = this;
 }
 
+void ESPNowBridge::learnPeer(const uint8_t *mac) {
+  for (uint8_t i = 0; i < _known_peer_count; i++) {
+    if (memcmp(_known_peers[i], mac, 6) == 0) return;  // already known
+  }
+  if (_known_peer_count >= MAX_KNOWN_PEERS) return;  // table full -- stays on broadcast for this one
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, mac, 6);
+  peerInfo.channel = _prefs->bridge_channel;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    BRIDGE_DEBUG_PRINTLN("Failed to register peer for unicast\n");
+    return;
+  }
+
+  memcpy(_known_peers[_known_peer_count], mac, 6);
+  _known_peer_count++;
+  BRIDGE_DEBUG_PRINTLN("Learned peer, now tracking %d for unicast\n", (int)_known_peer_count);
+}
+
 void ESPNowBridge::begin() {
   BRIDGE_DEBUG_PRINTLN("Initializing...\n");
 
@@ -60,6 +80,17 @@ void ESPNowBridge::begin() {
     return;
   }
 
+  // Reset unicast/retry/queue state -- begin() can be called again after end()
+  // (e.g. bridge.enabled toggled off/on), so this can't just rely on
+  // constructor-time initializers.
+  _known_peer_count = 0;
+  for (uint8_t i = 0; i < MAX_QUEUED_SENDS; i++) _send_queue[i].in_use = false;
+  _active_queue_idx = -1;
+  _active_peer_idx = 0;
+  _send_attempt = 0;
+  _send_in_flight = false;
+  _send_awaiting_retry = false;
+
   // Update bridge state
   _initialized = true;
 }
@@ -72,6 +103,13 @@ void ESPNowBridge::end() {
   if (esp_now_del_peer(broadcastAddress) != ESP_OK) {
     BRIDGE_DEBUG_PRINTLN("Error removing broadcast peer\n");
   }
+
+  // esp_now_deinit() below frees all peers regardless, but remove them
+  // explicitly first for clarity/symmetry with begin()'s registration.
+  for (uint8_t i = 0; i < _known_peer_count; i++) {
+    esp_now_del_peer(_known_peers[i]);
+  }
+  _known_peer_count = 0;
 
   // Unregister callbacks
   esp_now_register_recv_cb(nullptr);
@@ -90,7 +128,10 @@ void ESPNowBridge::end() {
 }
 
 void ESPNowBridge::loop() {
-  // Nothing to do here - ESP-NOW is callback based
+  if (_send_awaiting_retry && (int32_t)(millis() - _send_retry_at) >= 0) {
+    _send_awaiting_retry = false;
+    issueSend();
+  }
 }
 
 void ESPNowBridge::xorCrypt(uint8_t *data, size_t len) {
@@ -138,6 +179,13 @@ void ESPNowBridge::onDataRecv(const uint8_t *mac, const uint8_t *data, int32_t l
     return;
   }
 
+  // A valid, correctly-decrypted frame from this MAC -- worth remembering so
+  // future sends to it can use unicast (real ACK+retry) instead of broadcast.
+  // Only done post-checksum so a spoofed/garbage sender can't pollute the
+  // peer table (not a security boundary -- MAC spoofing is trivial on
+  // ESP-NOW -- just avoids wasting a table slot on noise).
+  _instance->learnPeer(mac);
+
   BRIDGE_DEBUG_PRINTLN("RX, payload_len=%d\n", payloadLen);
 
   // Create mesh packet
@@ -152,7 +200,77 @@ void ESPNowBridge::onDataRecv(const uint8_t *mac, const uint8_t *data, int32_t l
 }
 
 void ESPNowBridge::onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  // Could add transmission error handling here if needed
+  onSendResult(status == ESP_NOW_SEND_SUCCESS);
+}
+
+void ESPNowBridge::onSendResult(bool ok) {
+  _send_in_flight = false;
+  if (_active_queue_idx < 0) return;  // stray/late callback after a reset -- nothing to do
+
+  if (ok) {
+    BRIDGE_DEBUG_PRINTLN("TX ok, peer_idx=%d attempt=%d\n", (int)_active_peer_idx, (int)_send_attempt);
+    advanceToNextPeerOrFinish();
+  } else if (_send_attempt < MAX_SEND_ATTEMPTS) {
+    BRIDGE_DEBUG_PRINTLN("TX failed, will retry (attempt %d of %d)\n", (int)_send_attempt,
+                         (int)MAX_SEND_ATTEMPTS);
+    _send_awaiting_retry = true;
+    _send_retry_at = millis() + SEND_RETRY_DELAY_MS;
+  } else {
+    BRIDGE_DEBUG_PRINTLN("TX failed after %d attempts, giving up on this peer\n", (int)_send_attempt);
+    advanceToNextPeerOrFinish();
+  }
+}
+
+void ESPNowBridge::advanceToNextPeerOrFinish() {
+  bool wasBroadcast = (_active_peer_idx == PEER_IDX_BROADCAST);
+  uint8_t nextPeerIdx = wasBroadcast ? 0 : (uint8_t)(_active_peer_idx + 1);
+
+  if (_known_peer_count > 0 && nextPeerIdx < _known_peer_count) {
+    _active_peer_idx = nextPeerIdx;
+    _send_attempt = 0;
+    issueSend();
+  } else {
+    // Done fanning out to every known peer (or the sole broadcast attempt,
+    // if none were known yet) -- free this queue slot and pick up whatever's
+    // next.
+    _send_queue[_active_queue_idx].in_use = false;
+    _active_queue_idx = -1;
+    progressSend();
+  }
+}
+
+void ESPNowBridge::issueSend() {
+  if (_active_queue_idx < 0) return;
+  QueuedSend &q = _send_queue[_active_queue_idx];
+
+  uint8_t broadcastAddress[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+  const uint8_t *dest = (_active_peer_idx == PEER_IDX_BROADCAST)
+                             ? broadcastAddress
+                             : _known_peers[_active_peer_idx];
+
+  _send_attempt++;
+  _send_in_flight = true;
+  esp_err_t result = esp_now_send(dest, q.buffer, q.len);
+  if (result != ESP_OK) {
+    // Couldn't even hand this off to the driver -- treat like an immediate
+    // send failure so it still gets the same retry/give-up handling.
+    BRIDGE_DEBUG_PRINTLN("esp_now_send() call failed, err=%d\n", (int)result);
+    onSendResult(false);
+  }
+}
+
+void ESPNowBridge::progressSend() {
+  if (_active_queue_idx >= 0 || _send_in_flight || _send_awaiting_retry) return;  // already busy
+
+  for (uint8_t i = 0; i < MAX_QUEUED_SENDS; i++) {
+    if (_send_queue[i].in_use) {
+      _active_queue_idx = i;
+      _active_peer_idx = (_known_peer_count == 0) ? PEER_IDX_BROADCAST : 0;
+      _send_attempt = 0;
+      issueSend();
+      return;
+    }
+  }
 }
 
 void ESPNowBridge::sendPacket(mesh::Packet *packet) {
@@ -167,50 +285,56 @@ void ESPNowBridge::sendPacket(mesh::Packet *packet) {
     return;
   }
 
-  if (!_seen_packets.wasSeen(packet)) {
-    _seen_packets.markSeen(packet);
-    // Create a temporary buffer just for size calculation and reuse for actual writing
-    uint8_t sizingBuffer[MAX_PAYLOAD_SIZE];
-    uint16_t meshPacketLen = packet->writeTo(sizingBuffer);
+  if (_seen_packets.wasSeen(packet)) return;
+  _seen_packets.markSeen(packet);
 
-    // Check if packet fits within our maximum payload size
-    if (meshPacketLen > MAX_PAYLOAD_SIZE) {
-      BRIDGE_DEBUG_PRINTLN("TX packet too large (payload=%d, max=%d)\n", meshPacketLen,
-                           MAX_PAYLOAD_SIZE);
-      return;
-    }
+  // Create a temporary buffer just for size calculation and reuse for actual writing
+  uint8_t sizingBuffer[MAX_PAYLOAD_SIZE];
+  uint16_t meshPacketLen = packet->writeTo(sizingBuffer);
 
-    uint8_t buffer[MAX_ESPNOW_PACKET_SIZE];
-
-    // Write magic header (2 bytes)
-    buffer[0] = (BRIDGE_PACKET_MAGIC >> 8) & 0xFF;
-    buffer[1] = BRIDGE_PACKET_MAGIC & 0xFF;
-
-    // Write packet payload starting after magic header and checksum
-    const size_t packetOffset = BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE;
-    memcpy(buffer + packetOffset, sizingBuffer, meshPacketLen);
-
-    // Calculate and add checksum (only of the payload)
-    uint16_t checksum = fletcher16(buffer + packetOffset, meshPacketLen);
-    buffer[2] = (checksum >> 8) & 0xFF; // High byte
-    buffer[3] = checksum & 0xFF;        // Low byte
-
-    // Encrypt payload and checksum (not including magic header)
-    xorCrypt(buffer + BRIDGE_MAGIC_SIZE, meshPacketLen + BRIDGE_CHECKSUM_SIZE);
-
-    // Total packet size: magic header + checksum + payload
-    const size_t totalPacketSize = BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE + meshPacketLen;
-
-    // Broadcast using ESP-NOW
-    uint8_t broadcastAddress[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-    esp_err_t result = esp_now_send(broadcastAddress, buffer, totalPacketSize);
-
-    if (result == ESP_OK) {
-      BRIDGE_DEBUG_PRINTLN("TX, len=%d\n", meshPacketLen);
-    } else {
-      BRIDGE_DEBUG_PRINTLN("TX FAILED!\n");
-    }
+  // Check if packet fits within our maximum payload size
+  if (meshPacketLen > MAX_PAYLOAD_SIZE) {
+    BRIDGE_DEBUG_PRINTLN("TX packet too large (payload=%d, max=%d)\n", meshPacketLen,
+                         MAX_PAYLOAD_SIZE);
+    return;
   }
+
+  int8_t slot = -1;
+  for (uint8_t i = 0; i < MAX_QUEUED_SENDS; i++) {
+    if (!_send_queue[i].in_use) { slot = (int8_t)i; break; }
+  }
+  if (slot < 0) {
+    // Fanning out a previous packet to several peers (with retries) is
+    // taking a while and the queue's backed up -- drop rather than block,
+    // same tradeoff BridgeBase's own dedup/queueing already makes elsewhere.
+    BRIDGE_DEBUG_PRINTLN("TX send queue full, dropping packet\n");
+    return;
+  }
+
+  QueuedSend &q = _send_queue[slot];
+
+  // Write magic header (2 bytes)
+  q.buffer[0] = (BRIDGE_PACKET_MAGIC >> 8) & 0xFF;
+  q.buffer[1] = BRIDGE_PACKET_MAGIC & 0xFF;
+
+  // Write packet payload starting after magic header and checksum
+  const size_t packetOffset = BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE;
+  memcpy(q.buffer + packetOffset, sizingBuffer, meshPacketLen);
+
+  // Calculate and add checksum (only of the payload)
+  uint16_t checksum = fletcher16(q.buffer + packetOffset, meshPacketLen);
+  q.buffer[2] = (checksum >> 8) & 0xFF; // High byte
+  q.buffer[3] = checksum & 0xFF;        // Low byte
+
+  // Encrypt payload and checksum (not including magic header)
+  xorCrypt(q.buffer + BRIDGE_MAGIC_SIZE, meshPacketLen + BRIDGE_CHECKSUM_SIZE);
+
+  // Total packet size: magic header + checksum + payload
+  q.len = BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE + meshPacketLen;
+  q.in_use = true;
+
+  BRIDGE_DEBUG_PRINTLN("TX queued, len=%d, known_peers=%d\n", meshPacketLen, (int)_known_peer_count);
+  progressSend();
 }
 
 void ESPNowBridge::onPacketReceived(mesh::Packet *packet) {

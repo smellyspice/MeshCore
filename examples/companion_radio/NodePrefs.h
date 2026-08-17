@@ -41,8 +41,8 @@ public:
   char default_scope_name[31];
   uint8_t default_scope_key[16];
 #ifdef ESPNOW_BRIDGE_RADIO
-  uint8_t bridge_channel = 0;   // 0 = use compile-time BRIDGE_CHANNEL default
-  char bridge_secret[16];       // empty = use compile-time BRIDGE_SECRET default
+  uint8_t bridge_channel = 0;   // 0 = not configured yet -- radio stays inert, no compile-time default
+  char bridge_secret[16];       // empty = not configured yet -- radio stays inert, no compile-time default
 #endif
 
 private:

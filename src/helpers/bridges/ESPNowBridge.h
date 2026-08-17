@@ -69,6 +69,83 @@ private:
   /** Current position in receive buffer */
   size_t _rx_buffer_pos;
 
+  // --- Reliability: unicast-with-retry instead of fire-and-forget broadcast ---
+  //
+  // Broadcast ESP-NOW frames get NO MAC-layer ACK/retry at all (that's normal
+  // 802.11 behaviour, not an ESP-NOW quirk) -- every broadcast is exactly one
+  // shot on air. Unicast frames, by contrast, get real hardware-level ACK +
+  // automatic retry from the WiFi radio/firmware itself, for free, before
+  // send_cb() even fires. So instead of always broadcasting, we learn the MAC
+  // of every peer we've actually heard from (companions/repeaters we're
+  // bridged with) and unicast to each of them individually, falling back to
+  // broadcast only for peers we haven't heard from yet (bootstrap case).
+  //
+  // A single outbound mesh packet can therefore fan out to multiple unicast
+  // sends (one per known peer) -- these are deliberately serialized (wait for
+  // each send_cb() before starting the next), matching ESP-NOW's own guidance
+  // that sending again before the previous send's callback has returned can
+  // cause "disorder" of the callback. A small bounded queue absorbs bursts
+  // that arrive while a previous packet's fan-out/retries are still in flight.
+  static const uint8_t MAX_KNOWN_PEERS = 6;
+  static const uint8_t MAX_QUEUED_SENDS = 4;
+  static const uint8_t MAX_SEND_ATTEMPTS = 3;      // 1 initial + 2 retries, per peer
+  static const uint32_t SEND_RETRY_DELAY_MS = 30;  // backoff before re-trying a failed unicast
+
+  uint8_t _known_peers[MAX_KNOWN_PEERS][6];
+  uint8_t _known_peer_count = 0;
+
+  struct QueuedSend {
+    uint8_t buffer[MAX_ESPNOW_PACKET_SIZE];
+    size_t len = 0;
+    bool in_use = false;
+  };
+  QueuedSend _send_queue[MAX_QUEUED_SENDS];
+
+  // State for whichever queued send is currently being fanned out to peers.
+  int8_t _active_queue_idx = -1;   // -1 = nothing in flight
+  uint8_t _active_peer_idx = 0;    // index into _known_peers (or "broadcast" sentinel below)
+  uint8_t _send_attempt = 0;
+  bool _send_in_flight = false;
+  bool _send_awaiting_retry = false;
+  unsigned long _send_retry_at = 0;
+  static const uint8_t PEER_IDX_BROADCAST = 0xFF;  // sentinel: no known peers yet, use broadcast
+
+  /**
+   * Remembers a peer's MAC (from an incoming frame) so future sends to it can
+   * use unicast instead of broadcast. Registers it as a real ESP-NOW peer.
+   * No-op if already known or the table is full.
+   */
+  void learnPeer(const uint8_t *mac);
+
+  /**
+   * Starts fanning out _send_queue[_active_queue_idx] to peers if nothing is
+   * currently in flight for it. Called both when a new packet is queued and
+   * after each send completes/retries.
+   */
+  void progressSend();
+
+  /**
+   * Actually issues one esp_now_send() for the currently active queued send,
+   * to either _known_peers[_active_peer_idx] or the broadcast address if
+   * _active_peer_idx == PEER_IDX_BROADCAST.
+   */
+  void issueSend();
+
+  /**
+   * Handles the outcome of one send attempt (from either the async send_cb()
+   * or an immediate esp_now_send() failure): on success or attempts
+   * exhausted, moves on; on failure with attempts remaining, schedules a
+   * retry via loop().
+   */
+  void onSendResult(bool ok);
+
+  /**
+   * Advances to the next known peer for the current queued send, or -- if
+   * that was the last one (or the sole broadcast attempt) -- marks the
+   * queued send done and picks up whatever's next in the queue.
+   */
+  void advanceToNextPeerOrFinish();
+
   /**
    * Performs XOR encryption/decryption of data
    * Used to isolate different mesh networks
@@ -132,8 +209,9 @@ public:
   void end() override;
 
   /**
-   * Main loop handler
-   * ESP-NOW is callback-based, so this is currently empty
+   * Drives the send queue/retry state machine: advances to the next peer or
+   * retry attempt once a send has completed or its retry backoff has
+   * elapsed. Actual ESP-NOW TX/RX itself stays callback-based.
    */
   void loop() override;
 

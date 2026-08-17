@@ -24,6 +24,11 @@
 #define WITH_BRIDGE
 #endif
 
+#ifdef WITH_IP_BRIDGE
+#include "helpers/bridges/IpBridge.h"
+#define WITH_BRIDGE
+#endif
+
 #include <helpers/AdvertDataHelpers.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/ClientACL.h>
@@ -118,6 +123,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   RS232Bridge bridge;
 #elif defined(WITH_ESPNOW_BRIDGE)
   ESPNowBridge bridge;
+#elif defined(WITH_IP_BRIDGE)
+  IpBridge bridge;
 #endif
 
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
@@ -244,9 +251,25 @@ public:
   }
 
   void restartBridge() override {
-    if (!bridge.isRunning()) return;
-    bridge.end();
-    bridge.begin();
+    if (bridge.isRunning()) {
+      bridge.end();
+      bridge.begin();
+    }
+#ifdef ESPNOW_BRIDGE_RADIO
+    // bridge.channel/bridge.secret (FR11) are the ESPNowBridgeRadio's own
+    // channel/secret, unrelated to the `bridge` (IpBridge/etc) member above
+    // despite the similar naming -- both happen to route through this same
+    // callback since CommonCLI's 'set bridge.channel'/'set bridge.secret'
+    // handlers call restartBridge() either way. Applying this here (rather
+    // than only at boot in begin()) is what makes the channel/secret
+    // actually CLI-settable instead of compile-time only.
+    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+#endif
+  }
+#endif
+#if !defined(WITH_BRIDGE) && defined(ESPNOW_BRIDGE_RADIO)
+  void restartBridge() override {
+    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
   }
 #endif
 

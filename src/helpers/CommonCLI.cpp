@@ -5,6 +5,10 @@
 #include "TxtDataHelpers.h"
 #include <RTClib.h>
 
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  #include <WiFi.h>
+#endif
+
 #ifndef BRIDGE_MAX_BAUD
 #define BRIDGE_MAX_BAUD 115200
 #endif
@@ -746,7 +750,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       sprintf(reply, "Error: baud rate must be between 9600-%d",BRIDGE_MAX_BAUD);
     }
 #endif
-#ifdef WITH_ESPNOW_BRIDGE
+#if defined(WITH_ESPNOW_BRIDGE) || defined(ESPNOW_BRIDGE_RADIO)
   } else if (memcmp(config, "bridge.channel ", 15) == 0) {
     int ch = atoi(&config[15]);
     if (ch > 0 && ch < 15) {
@@ -759,6 +763,38 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     }
   } else if (memcmp(config, "bridge.secret ", 14) == 0) {
     StrHelper::strncpy(_prefs->bridge_secret, &config[14], sizeof(_prefs->bridge_secret));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+#endif
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  } else if (memcmp(config, "wifi.ssid ", 10) == 0) {
+    StrHelper::strncpy(_prefs->wifi_ssid, &config[10], sizeof(_prefs->wifi_ssid));
+    savePrefs();
+    strcpy(reply, "OK - reboot to apply");
+  } else if (memcmp(config, "wifi.pwd ", 9) == 0) {
+    StrHelper::strncpy(_prefs->wifi_pwd, &config[9], sizeof(_prefs->wifi_pwd));
+    savePrefs();
+    strcpy(reply, "OK - reboot to apply");
+#endif
+#ifdef WITH_IP_BRIDGE
+  } else if (memcmp(config, "ip.host ", 8) == 0) {
+    StrHelper::strncpy(_prefs->ip_host, &config[8], sizeof(_prefs->ip_host));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+  } else if (memcmp(config, "ip.port ", 8) == 0) {
+    int port = atoi(&config[8]);
+    if (port > 0 && port <= 65535) {
+      _prefs->ip_port = (uint16_t)port;
+      _callbacks->restartBridge();
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error: port must be 1-65535");
+    }
+  } else if (memcmp(config, "ip.secret ", 10) == 0) {
+    StrHelper::strncpy(_prefs->ip_secret, &config[10], sizeof(_prefs->ip_secret));
     _callbacks->restartBridge();
     savePrefs();
     strcpy(reply, "OK");
@@ -910,6 +946,8 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
             "rs232"
 #elif WITH_ESPNOW_BRIDGE
             "espnow"
+#elif WITH_IP_BRIDGE
+            "ip"
 #else
             "none"
 #endif
@@ -926,11 +964,31 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "bridge.baud", 11) == 0) {
     sprintf(reply, "> %d", (uint32_t)_prefs->bridge_baud);
 #endif
-#ifdef WITH_ESPNOW_BRIDGE
+#if defined(WITH_ESPNOW_BRIDGE) || defined(ESPNOW_BRIDGE_RADIO)
   } else if (memcmp(config, "bridge.channel", 14) == 0) {
     sprintf(reply, "> %d", (uint32_t)_prefs->bridge_channel);
   } else if (memcmp(config, "bridge.secret", 13) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_secret);
+#endif
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+  } else if (memcmp(config, "wifi.ssid", 9) == 0) {
+    sprintf(reply, "> %s", _prefs->wifi_ssid);
+  } else if (memcmp(config, "wifi.pwd", 8) == 0) {
+    sprintf(reply, "> %s", _prefs->wifi_pwd);
+  } else if (memcmp(config, "wifi.status", 11) == 0) {
+    if (WiFi.status() == WL_CONNECTED) {
+      sprintf(reply, "> connected, ip=%s, rssi=%ddBm", WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    } else {
+      sprintf(reply, "> not connected (status=%d)", (int)WiFi.status());
+    }
+#endif
+#ifdef WITH_IP_BRIDGE
+  } else if (memcmp(config, "ip.host", 7) == 0) {
+    sprintf(reply, "> %s", _prefs->ip_host);
+  } else if (memcmp(config, "ip.port", 7) == 0) {
+    sprintf(reply, "> %d", (uint32_t)_prefs->ip_port);
+  } else if (memcmp(config, "ip.secret", 9) == 0) {
+    sprintf(reply, "> %s", _prefs->ip_secret);
 #endif
   } else if (memcmp(config, "bootloader.ver", 14) == 0) {
   #ifdef NRF52_PLATFORM
