@@ -28,20 +28,16 @@ extern ESPNowBridgeRadio radio_driver;
 #ifndef IP_BRIDGE_PSK_IDENTITY
 #define IP_BRIDGE_PSK_IDENTITY       "meshcore-bridge"  // not secret, just an identifier
 #endif
-#ifndef IP_BRIDGE_TENTATIVE_HANDSHAKE_TIMEOUT_MS
-#define IP_BRIDGE_TENTATIVE_HANDSHAKE_TIMEOUT_MS 12000  // see _tentative_active in IpBridge.h
-#endif
 
 IpBridge::IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc)
     : BridgeBase(prefs, mgr, rtc) {
   mbedtls_net_init(&_listen_fd);
-  mbedtls_net_init(&_conn_fd_slot[0]);
-  mbedtls_net_init(&_conn_fd_slot[1]);
-  mbedtls_ssl_init(&_ssl_slot[0]);
-  mbedtls_ssl_init(&_ssl_slot[1]);
+  mbedtls_net_init(&_conn_fd_slot);
+  mbedtls_ssl_init(&_ssl_slot);
   mbedtls_ssl_config_init(&_ssl_conf);
   mbedtls_ctr_drbg_init(&_ctr_drbg);
   mbedtls_entropy_init(&_entropy);
+  mbedtls_ssl_cookie_init(&_cookie_ctx);
 }
 
 // mbedtls_ssl_set_timer_cb callbacks -- millis()-based rather than mbedtls_timing's
@@ -91,13 +87,20 @@ bool IpBridge::setupTlsConfig() {
 
   // mbedtls_ssl_conf_dtls_cookies()'s DEFAULT is dummy callbacks that always
   // FAIL, specifically to force an explicit choice -- real cookie callbacks, or
-  // NULL to disable HelloVerifyRequest outright. We deliberately chose to skip
-  // the cookie/anti-amplification mechanism (see class comment in IpBridge.h --
-  // single fixed peer by design, so the multi-client DoS protection it exists
-  // for doesn't apply here), but never actually told mbedTLS that -- leaving it
-  // on the default meant every handshake failed cookie verification. This call
-  // is what actually disables it; server-only API, harmless to call as client too.
-  mbedtls_ssl_conf_dtls_cookies(&_ssl_conf, NULL, NULL, NULL);
+  // NULL to disable HelloVerifyRequest outright. Real callbacks are used here:
+  // even though this bridge only ever has one fixed peer (so the "let one bind
+  // socket serve many simultaneous clients" use case for cookies doesn't
+  // apply), the cookie round trip also proves the ClientHello's source address
+  // is real (return-routability) before the larger ServerHello/
+  // ServerKeyExchange/ServerHelloDone flight is ever sent there -- without it,
+  // an attacker could spoof another host's IP as the datagram source and use
+  // this bridge to reflect/amplify traffic at that host. Server-only API,
+  // harmless to call as client too.
+  if (mbedtls_ssl_cookie_setup(&_cookie_ctx, mbedtls_ctr_drbg_random, &_ctr_drbg) != 0) {
+    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_cookie_setup failed\n");
+    return false;
+  }
+  mbedtls_ssl_conf_dtls_cookies(&_ssl_conf, mbedtls_ssl_cookie_write, mbedtls_ssl_cookie_check, &_cookie_ctx);
 
   // CRITICAL: mbedtls_ssl_set_bio() below passes NULL for f_recv_timeout, not
   // mbedtls_net_recv_timeout(). This was originally wired up with a 1ms
@@ -186,11 +189,11 @@ void IpBridge::end() {
 
   mbedtls_ssl_free(_ssl);
   mbedtls_net_free(_conn_fd);
-  discardTentative();
   mbedtls_net_free(&_listen_fd);
   mbedtls_ssl_config_free(&_ssl_conf);
   mbedtls_ctr_drbg_free(&_ctr_drbg);
   mbedtls_entropy_free(&_entropy);
+  mbedtls_ssl_cookie_free(&_cookie_ctx);
   _tls_conf_ready = false;
 
   mbedtls_ssl_init(_ssl);
@@ -199,6 +202,7 @@ void IpBridge::end() {
   mbedtls_ssl_config_init(&_ssl_conf);
   mbedtls_ctr_drbg_init(&_ctr_drbg);
   mbedtls_entropy_init(&_entropy);
+  mbedtls_ssl_cookie_init(&_cookie_ctx);
 
   _state = State::IDLE;
   _rx_buffer_pos = 0;
@@ -293,6 +297,12 @@ void IpBridge::pollListening() {
   *_conn_fd = new_conn;
   mbedtls_net_set_nonblock(_conn_fd);
 
+  // Saved so it can be re-asserted after MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED
+  // resets the SSL context in pollHandshake() -- the cookie is bound to this
+  // address, so mbedTLS needs it again on the second (post-cookie) attempt.
+  memcpy(_client_ip, client_ip, client_ip_len);
+  _client_ip_len = client_ip_len;
+
   mbedtls_ssl_free(_ssl);
   mbedtls_ssl_init(_ssl);
   if (mbedtls_ssl_setup(_ssl, &_ssl_conf) != 0) {
@@ -301,6 +311,7 @@ void IpBridge::pollListening() {
     mbedtls_net_init(_conn_fd);
     return;  // stay LISTENING
   }
+  mbedtls_ssl_set_client_transport_id(_ssl, _client_ip, _client_ip_len);
   mbedtls_ssl_set_bio(_ssl, _conn_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
   mbedtls_ssl_set_timer_cb(_ssl, _timer, timerSetDelay, timerGetDelay);
 
@@ -326,6 +337,16 @@ void IpBridge::pollHandshake() {
   if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
       ret == MBEDTLS_ERR_SSL_TIMEOUT) {
     return;  // keep polling; mbedTLS handles DTLS retransmit internally
+  }
+  if (ret == MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED) {
+    // Normal step in the cookie exchange (server only): mbedTLS already sent
+    // the HelloVerifyRequest itself as part of this call. Reset the session
+    // and keep polling on the same socket for the client's cookie-bearing
+    // resend -- this is mbedTLS's documented pattern (see e.g. its own
+    // programs/ssl/dtls_server.c), not a failure.
+    mbedtls_ssl_session_reset(_ssl);
+    mbedtls_ssl_set_client_transport_id(_ssl, _client_ip, _client_ip_len);
+    return;
   }
 
   BRIDGE_DEBUG_PRINTLN("DTLS handshake failed, err=%d\n", ret);
@@ -402,26 +423,14 @@ void IpBridge::pollConnectedIO() {
   // error under different timing, particularly on the write path.
   if (_state != State::CONNECTED) return;
 
-  // DISABLED 2026-08-16, live-hardware-confirmed hang: calling
-  // mbedtls_net_accept() repeatedly on _listen_fd while it's already had one
-  // client accepted from it hung the hub solid (no CLI response at all,
-  // needed a physical power cycle) shortly after reaching CONNECTED.
-  // Suspected root cause, not yet proven: MBEDTLS_SSL_DTLS_CLIENT_PORT_REUSE
-  // (the mechanism this whole reconnect-detection path leans on) explicitly
-  // "Requires: MBEDTLS_SSL_DTLS_HELLO_VERIFY" per mbedTLS's own config.h --
-  // and HelloVerifyRequest/cookies are deliberately disabled elsewhere in
-  // this file (mbedtls_ssl_conf_dtls_cookies(..., NULL, NULL, NULL)). Calling
-  // accept() repeatedly on an already-used listen socket without that
-  // safety net may simply not be a supported/defined usage pattern. Left
-  // disabled (code kept, not deleted) until this is actually verified safe --
-  // see planning/ip-bridge-design.md for the investigation. Net effect:
-  // Bug 4's original ~45s-worst-case reconnect delay for a peer restarting
-  // from a NEW source port is back until this is re-enabled; Bug 3's fix
-  // (same-port reconnect) is unaffected, since it doesn't touch _listen_fd.
-  // if (_is_server) {
-  //   checkForReconnectAttempt();
-  //   pollTentativeHandshake();
-  // }
+  // A peer restarting from a new source port (rather than the same one) won't
+  // be detected until the existing session's own heartbeat timeout expires --
+  // no separate parallel-accept/reconnect-detection path while CONNECTED. An
+  // earlier version of this attempted that (accepting a second, tentative
+  // connection on _listen_fd while already CONNECTED, verifying it on its own
+  // context, then promoting it) but hung the hub solid on real hardware and
+  // was removed rather than carried forward disabled; see git history and
+  // planning/ip-bridge-design.md for the investigation if this is revisited.
 
   // bounded drain per loop() call -- responsive without hogging the main loop
   // if a burst of traffic arrives all at once
@@ -469,104 +478,6 @@ void IpBridge::pollConnectedIO() {
     teardownConnection(true);
     return;
   }
-}
-
-void IpBridge::checkForReconnectAttempt() {
-  if (_tentative_active) return;  // one at a time -- see IpBridge.h
-
-  mbedtls_net_context new_conn;
-  mbedtls_net_init(&new_conn);
-  unsigned char client_ip[16];
-  size_t client_ip_len = 0;
-  int ret = mbedtls_net_accept(&_listen_fd, &new_conn, client_ip, sizeof(client_ip), &client_ip_len);
-  if (ret != 0) {
-    mbedtls_net_free(&new_conn);
-    return;  // MBEDTLS_ERR_SSL_WANT_READ (nothing pending) or a transient accept error
-  }
-
-  // Someone's attempting a new connection while we already have one live --
-  // do NOT touch the live session (_ssl/_conn_fd) here. Set up the
-  // challenger on the separate tentative slot instead; it only ever gets
-  // promoted to live if it actually completes a PSK-authenticated handshake
-  // (see pollTentativeHandshake()). A scanner or garbage UDP hitting the
-  // port costs at most one bounded, timed-out tentative attempt -- the real
-  // connection is never disrupted by an unauthenticated sender.
-  mbedtls_net_free(_tentative_conn_fd);
-  *_tentative_conn_fd = new_conn;
-  mbedtls_net_set_nonblock(_tentative_conn_fd);
-
-  mbedtls_ssl_free(_tentative_ssl);
-  mbedtls_ssl_init(_tentative_ssl);
-  if (mbedtls_ssl_setup(_tentative_ssl, &_ssl_conf) != 0) {
-    BRIDGE_DEBUG_PRINTLN("Tentative reconnect: mbedtls_ssl_setup failed\n");
-    mbedtls_net_free(_tentative_conn_fd);
-    mbedtls_net_init(_tentative_conn_fd);
-    return;
-  }
-  mbedtls_ssl_set_bio(_tentative_ssl, _tentative_conn_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
-  mbedtls_ssl_set_timer_cb(_tentative_ssl, _tentative_timer, timerSetDelay, timerGetDelay);
-
-  _tentative_active = true;
-  _tentative_started_at = millis();
-  BRIDGE_DEBUG_PRINTLN("Possible peer reconnect detected, verifying via tentative handshake\n");
-}
-
-void IpBridge::pollTentativeHandshake() {
-  if (!_tentative_active) return;
-
-  if ((int32_t)(millis() - _tentative_started_at) > IP_BRIDGE_TENTATIVE_HANDSHAKE_TIMEOUT_MS) {
-    BRIDGE_DEBUG_PRINTLN("Tentative reconnect timed out, discarding (no valid PSK proven)\n");
-    discardTentative();
-    return;
-  }
-
-  int ret = mbedtls_ssl_handshake(_tentative_ssl);
-  if (ret == 0) {
-    // Verified: this challenger proved possession of the correct PSK by
-    // completing a full handshake. Safe to replace the live session now --
-    // swap which slot _ssl/_conn_fd/_timer point at (see IpBridge.h comment
-    // on why this is a pointer swap, never a struct copy).
-    BRIDGE_DEBUG_PRINTLN("Tentative reconnect verified, replacing live session\n");
-    mbedtls_ssl_free(_ssl);
-    mbedtls_net_free(_conn_fd);
-    mbedtls_ssl_context *old_ssl = _ssl;
-    mbedtls_net_context *old_conn_fd = _conn_fd;
-    Timer *old_timer = _timer;
-    _ssl = _tentative_ssl;
-    _conn_fd = _tentative_conn_fd;
-    _timer = _tentative_timer;
-    _tentative_ssl = old_ssl;
-    _tentative_conn_fd = old_conn_fd;
-    _tentative_timer = old_timer;
-    mbedtls_ssl_init(_tentative_ssl);   // reset the now-freed old slot to a clean, unused state
-    mbedtls_net_init(_tentative_conn_fd);
-    _tentative_active = false;
-
-    _rx_buffer_pos = 0;
-    _state = State::CONNECTED;
-    _last_rx_at = millis();
-    _consecutive_connect_failures = 0;
-#ifdef ESPNOW_BRIDGE_RADIO
-    radio_driver.setLinkConnected(true);
-#endif
-    return;
-  }
-  if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
-      ret == MBEDTLS_ERR_SSL_TIMEOUT) {
-    return;  // keep polling, within the timeout budget above
-  }
-  // Any other error (bad ClientHello, garbage, wrong PSK failing at key
-  // exchange/Finished) -- discard. The live session was never touched.
-  BRIDGE_DEBUG_PRINTLN("Tentative reconnect failed, err=%d (live session untouched)\n", ret);
-  discardTentative();
-}
-
-void IpBridge::discardTentative() {
-  mbedtls_ssl_free(_tentative_ssl);
-  mbedtls_net_free(_tentative_conn_fd);
-  mbedtls_ssl_init(_tentative_ssl);
-  mbedtls_net_init(_tentative_conn_fd);
-  _tentative_active = false;
 }
 
 void IpBridge::processFramedByte(uint8_t b) {
