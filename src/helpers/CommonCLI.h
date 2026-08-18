@@ -54,14 +54,18 @@ public:
   uint32_t bridge_baud = 0;   // 9600, 19200, 38400, 57600, 115200 (default 115200)
   uint8_t bridge_channel = 0; // 1-14 (ESP-NOW only)
   char bridge_secret[16]; // for XOR encryption of bridge packets (ESP-NOW only)
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
   // WiFi STA settings (internet-bridge groundwork, see planning/ip-bridge-design.md)
   char wifi_ssid[33];
   char wifi_pwd[64];
+#endif
+#ifdef WITH_IP_BRIDGE
   // IpBridge settings: host empty = server/listen mode, host set = client
   // (dials out to it). Secret is a DTLS-PSK pre-shared key, unrelated to bridge_secret.
   char ip_host[64];
   uint16_t ip_port = 0;
   char ip_secret[32];
+#endif
   // Power setting
   uint8_t powersaving_enabled = 0; // boolean
   // Gps settings
@@ -123,6 +127,7 @@ private:
   };
   BridgePrefs bridge;
 
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
   class WifiPrefs : public ConfigSerializer {
     NodePrefs* _parent;
   protected:
@@ -134,7 +139,9 @@ private:
     WifiPrefs(NodePrefs* parent) : _parent(parent) { }
   };
   WifiPrefs wifi;
+#endif
 
+#ifdef WITH_IP_BRIDGE
   class IpPrefs : public ConfigSerializer {
     NodePrefs* _parent;
   protected:
@@ -147,6 +154,7 @@ private:
     IpPrefs(NodePrefs* parent) : _parent(parent) { }
   };
   IpPrefs inet;
+#endif
 
   class GPSPrefs : public ConfigSerializer {
     NodePrefs* _parent;
@@ -211,8 +219,12 @@ protected:
     def("lon", node_lon);
     def("radio", radio);
     def("bridge", bridge);
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
     def("wifi", wifi);
+#endif
+#ifdef WITH_IP_BRIDGE
     def("inet", inet);
+#endif
     def("gps", gps);
     def("repeat", repeat);
     def("room", room);
@@ -220,15 +232,26 @@ protected:
   }
 
 public:
-  NodePrefs() : ConfigSerializer(), bridge(this), wifi(this), inet(this), gps(this), radio(this), power(this), repeat(this), room(this) {
+  NodePrefs() : ConfigSerializer(), bridge(this),
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+    wifi(this),
+#endif
+#ifdef WITH_IP_BRIDGE
+    inet(this),
+#endif
+    gps(this), radio(this), power(this), repeat(this), room(this) {
     node_name[0] = 0;
     password[0] = 0;
     guest_password[0] = 0;
     bridge_secret[0] = 0;
+#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
     wifi_ssid[0] = 0;
     wifi_pwd[0] = 0;
+#endif
+#ifdef WITH_IP_BRIDGE
     ip_host[0] = 0;
     ip_secret[0] = 0;
+#endif
     owner_info[0] = 0;
   }
 };

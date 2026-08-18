@@ -5,6 +5,7 @@
 #ifdef WITH_IP_BRIDGE
 
 #include <mbedtls/ssl.h>
+#include <mbedtls/ssl_cookie.h>
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -31,14 +32,18 @@
  *     _prefs->ip_host empty, ip_port set -> SERVER: listens on ip_port,
  *       accepts datagrams from the first peer that completes a valid DTLS-PSK
  *       handshake, then locks (connects) the socket to that one peer address.
- *       Deliberately NOT implementing mbedTLS's HelloVerifyRequest/cookie
- *       multi-client-tracking mechanism -- that exists to let one bind socket
- *       serve many simultaneous clients, which doesn't apply here (exactly one
- *       peer, ever, by design -- see planning doc). Accepted tradeoff: a
- *       malicious remote host could send us garbage ClientHellos and cost us a
- *       little CPU on failed handshakes, but without the correct PSK they can
- *       never complete a handshake or read/write mesh traffic -- worst case is a
- *       minor CPU nuisance, not a confidentiality/integrity risk.
+ *       DOES implement mbedTLS's HelloVerifyRequest/cookie mechanism
+ *       (_cookie_ctx below), even though its usual purpose -- letting one bind
+ *       socket track many simultaneous clients -- doesn't apply here (exactly
+ *       one peer, ever, by design -- see planning doc). It's kept anyway
+ *       because it doubles as UDP source-address return-routability proof: an
+ *       attacker who spoofs another host's IP as the datagram source can't
+ *       complete the cookie round trip (the HelloVerifyRequest goes to the
+ *       spoofed address, not to them), so they can never provoke the larger
+ *       ServerHello/ServerKeyExchange/ServerHelloDone flight -- closing off
+ *       using this bridge as a reflection/amplification vector against a
+ *       third party. Without it, only the small HelloVerifyRequest itself
+ *       could ever be sent toward a spoofed address instead.
  * - Dead-link detection is app-level (ping/pong heartbeat, N consecutive misses),
  *   because UDP/DTLS gives no OS-level "connection dropped" signal at all.
  * - DNS (client/spoke side only) is failure-triggered, not proactive: on
@@ -119,45 +124,25 @@ private:
 
   mbedtls_net_context _listen_fd;
 
-  // Two fixed-address slots for the connection contexts, so a peer-restart
-  // reconnect (see checkForReconnectAttempt()/pollTentativeHandshake()) can
-  // verify a challenger on a SEPARATE tentative context without disturbing
-  // the live one -- an unauthenticated sender (scanner, garbage UDP) can
-  // never affect the live session, only cost a bounded amount of CPU/RAM on
-  // its own doomed attempt (same accepted tradeoff as the no-HelloVerify
-  // decision above, extended to cover this path too). _ssl/_conn_fd/_timer
-  // are pointers into whichever slot is currently "live"; promoting a
-  // verified tentative attempt just flips which slot each pointer targets --
-  // deliberately NOT a struct copy/swap, since mbedtls_ssl_context stores
-  // pointers (via mbedtls_ssl_set_bio()/set_timer_cb()) back to &_conn_fd/
-  // &_timer by address, and copying the struct's bytes elsewhere would leave
-  // those internal pointers referencing the old (soon-to-be-reused) address.
-  // Swapping the indirection layer instead means the underlying structs
-  // never move, so nothing needs re-pointing.
-  mbedtls_net_context _conn_fd_slot[2];
-  mbedtls_ssl_context _ssl_slot[2];
-  Timer _timer_slot[2];
-  mbedtls_net_context *_conn_fd = &_conn_fd_slot[0];
-  mbedtls_ssl_context *_ssl = &_ssl_slot[0];
-  Timer *_timer = &_timer_slot[0];
-  mbedtls_net_context *_tentative_conn_fd = &_conn_fd_slot[1];
-  mbedtls_ssl_context *_tentative_ssl = &_ssl_slot[1];
-  Timer *_tentative_timer = &_timer_slot[1];
-
-  // Bounded to exactly one tentative attempt at a time (no pool/queue) --
-  // caps worst-case extra RAM at one additional mbedtls_ssl_context
-  // (~32KB, same MBEDTLS_SSL_MAX_CONTENT_LEN cost as the live session, see
-  // NFR6 in planning/ip-bridge-design.md) no matter how many stray
-  // packets/scanners hit the listen port. Has its own timeout, shorter than
-  // and independent of the main heartbeat timeout, so a stalled or
-  // intentionally-incomplete attempt can't camp the slot indefinitely.
-  bool _tentative_active = false;
-  unsigned long _tentative_started_at = 0;
+  mbedtls_net_context _conn_fd_slot;
+  mbedtls_ssl_context _ssl_slot;
+  Timer _timer_slot;
+  mbedtls_net_context *_conn_fd = &_conn_fd_slot;
+  mbedtls_ssl_context *_ssl = &_ssl_slot;
+  Timer *_timer = &_timer_slot;
 
   mbedtls_ssl_config _ssl_conf;
   mbedtls_ctr_drbg_context _ctr_drbg;
   mbedtls_entropy_context _entropy;
+  mbedtls_ssl_cookie_ctx _cookie_ctx;  // server-only, harmless to init/free as client too
   bool _tls_conf_ready = false;
+
+  // Source address of the peer currently mid-handshake (server role only) --
+  // needed by mbedtls_ssl_set_client_transport_id(), including re-asserting it
+  // after MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED resets the SSL context (see
+  // pollHandshake()).
+  unsigned char _client_ip[16];
+  size_t _client_ip_len = 0;
 
   static constexpr uint16_t OVERHEAD = BRIDGE_MAGIC_SIZE + BRIDGE_LENGTH_SIZE + BRIDGE_CHECKSUM_SIZE;
   static constexpr uint16_t MAX_PACKET_SIZE = (MAX_TRANS_UNIT + 1) + OVERHEAD;
@@ -184,10 +169,6 @@ private:
   void sendFramed(const uint8_t *payload, uint16_t len);  // shared: packets + heartbeat
   static int timerGetDelay(void *ctx);
   static void timerSetDelay(void *ctx, uint32_t int_ms, uint32_t fin_ms);
-
-  void checkForReconnectAttempt();  // server only: watch _listen_fd while CONNECTED
-  void pollTentativeHandshake();    // advance/timeout/promote the tentative attempt
-  void discardTentative();
 };
 
 #endif

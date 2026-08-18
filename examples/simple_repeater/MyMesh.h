@@ -251,10 +251,14 @@ public:
   }
 
   void restartBridge() override {
-    if (bridge.isRunning()) {
-      bridge.end();
-      bridge.begin();
-    }
+    // Always end()+begin(), not just when already running -- bridge.begin()
+    // re-validates config and is a safe no-op if still incomplete, but if we
+    // only reset an already-running bridge, a board configured entirely via
+    // CLI (ip.host/ip.port/ip.secret set one at a time, each triggering this
+    // callback) would never actually start until a reboot, since isRunning()
+    // stays false until begin() has already succeeded once.
+    bridge.end();
+    bridge.begin();
 #ifdef ESPNOW_BRIDGE_RADIO
     // bridge.channel/bridge.secret (FR11) are the ESPNowBridgeRadio's own
     // channel/secret, unrelated to the `bridge` (IpBridge/etc) member above
@@ -262,14 +266,22 @@ public:
     // callback since CommonCLI's 'set bridge.channel'/'set bridge.secret'
     // handlers call restartBridge() either way. Applying this here (rather
     // than only at boot in begin()) is what makes the channel/secret
-    // actually CLI-settable instead of compile-time only.
-    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    // actually CLI-settable instead of compile-time only. Gated the same way
+    // begin() gates its own initial call -- setting only one of the two via
+    // CLI must leave the radio inert, not armed with an empty secret (which
+    // would divide-by-zero in ESPNowBridgeRadio's xorCrypt() on the next
+    // received frame).
+    if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+      radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    }
 #endif
   }
 #endif
 #if !defined(WITH_BRIDGE) && defined(ESPNOW_BRIDGE_RADIO)
   void restartBridge() override {
-    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+      radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    }
   }
 #endif
 

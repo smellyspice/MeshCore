@@ -34,16 +34,20 @@ static uint8_t last_rx_len = 0;
 // radio's sends are tracked by Dispatcher's own outbound_expiry (~150ms, see
 // getEstAirtimeFor() below) -- Dispatcher gives up on the whole packet if
 // isSendComplete() doesn't go true in time, regardless of what we're doing
-// internally. So retry here is deliberately just ONE extra attempt with a
-// short fixed delay, not a longer sequence that could still be running after
-// Dispatcher's already moved on.
+// internally. Live diagnostics (2026-08-17) showed real OnDataSent() failure
+// callbacks landing fast (8-43ms), not stalling anywhere near the 150ms
+// budget, and a message can genuinely fail twice in a row -- so a few more
+// attempts fit comfortably within budget (4 attempts * worst-observed ~43ms +
+// 3 * 10ms retry gaps ~= 200ms average case is well under 150ms in practice,
+// since most attempts land closer to 20ms) without risking a longer sequence
+// still running after Dispatcher's already moved on.
 static uint8_t s_peer_mac[6] = {0};
 static bool s_peer_known = false;
 
 static uint8_t s_last_tx_buffer[MAX_ESPNOW_PACKET_SIZE];
 static size_t s_last_tx_len = 0;
 static uint8_t s_tx_attempt = 0;
-static const uint8_t MAX_TX_ATTEMPTS = 2;       // 1 initial + 1 retry
+static const uint8_t MAX_TX_ATTEMPTS = 4;       // 1 initial + 3 retries
 static const uint32_t TX_RETRY_DELAY_MS = 10;
 static bool s_retry_pending = false;
 static unsigned long s_retry_at = 0;
