@@ -103,6 +103,13 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   RegionMap region_map, temp_map;
   RegionEntry* load_stack[8];
   RegionEntry* recv_pkt_region;
+  // Which bridge (if any) delivered the packet currently being processed --
+  // copied from Packet::_src_bridge at the same point recv_pkt_region is
+  // set, read back in sendFloodReply() to route the reply directly back out
+  // that same bridge instead of requiring a local radio broadcast first.
+  // void* (not AbstractBridge*) to avoid a new #include here; cast back to
+  // AbstractBridge* at the point it's actually used.
+  void* recv_pkt_source_bridge;
   TransportKey default_scope;
   RateLimiter discover_limiter, anon_limiter;
   uint32_t pending_discover_tag;
@@ -175,6 +182,9 @@ protected:
 #endif
 
   mesh::DispatcherAction onRecvPacket(mesh::Packet* pkt) override;
+#ifdef WITH_BRIDGE
+  bool trySendViaBridge(mesh::Packet* packet) override;
+#endif
 
   void onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret, const mesh::Identity& sender, uint8_t* data, size_t len) override;
   int searchPeersByHash(const uint8_t* hash) override;

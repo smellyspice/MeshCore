@@ -554,6 +554,12 @@ uint32_t MyMesh::getDirectRetransmitDelay(const mesh::Packet *packet) {
 }
 
 mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
+  // Stashed here (not read directly off pkt at reply time) for the same
+  // reason recv_pkt_region is: reply generation happens several calls deep,
+  // and this is the established pattern for carrying per-packet context
+  // that far. See recv_pkt_source_bridge's declaration in MyMesh.h.
+  recv_pkt_source_bridge = pkt->_src_bridge;
+
   if (pkt->getRouteType() == ROUTE_TYPE_TRANSPORT_FLOOD) {
     recv_pkt_region = region_map.findMatch(pkt, REGION_DENY_FLOOD);
   } else if (pkt->getRouteType() == ROUTE_TYPE_FLOOD) {
@@ -567,6 +573,25 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
   }
   return Mesh::onRecvPacket(pkt);
 }
+
+#ifdef WITH_BRIDGE
+bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
+  // Consume-once: whether or not it's used here, this must not silently
+  // apply to some later, unrelated send (e.g. a periodic self-advert firing
+  // before the next real packet is received) -- only the very next
+  // sendPacket() call after a bridge-sourced packet is processed is
+  // eligible, matching exactly the packet recv_pkt_source_bridge was set
+  // for. See its declaration in MyMesh.h.
+  void* bridge = recv_pkt_source_bridge;
+  recv_pkt_source_bridge = NULL;
+
+  if (bridge == NULL) return false;
+
+  ((AbstractBridge *)bridge)->sendPacket(packet);
+  releasePacket(packet);   // normally freed after local TX completes -- this path bypasses that entirely
+  return true;
+}
+#endif
 
 void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,
                             uint8_t *data, size_t len) {
@@ -884,6 +909,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _logging = false;
   region_load_active = false;
   recv_pkt_region = NULL;
+  recv_pkt_source_bridge = NULL;
 
 #if MAX_NEIGHBOURS
   memset(neighbours, 0, sizeof(neighbours));
