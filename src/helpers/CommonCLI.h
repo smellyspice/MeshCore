@@ -54,7 +54,7 @@ public:
   uint32_t bridge_baud = 0;   // 9600, 19200, 38400, 57600, 115200 (default 115200)
   uint8_t bridge_channel = 0; // 1-14 (ESP-NOW only)
   char bridge_secret[16]; // for XOR encryption of bridge packets (ESP-NOW only)
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   // WiFi STA settings (internet-bridge groundwork, see planning/ip-bridge-design.md)
   char wifi_ssid[33];
   char wifi_pwd[64];
@@ -127,7 +127,7 @@ private:
   };
   BridgePrefs bridge;
 
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   class WifiPrefs : public ConfigSerializer {
     NodePrefs* _parent;
   protected:
@@ -219,7 +219,7 @@ protected:
     def("lon", node_lon);
     def("radio", radio);
     def("bridge", bridge);
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
     def("wifi", wifi);
 #endif
 #ifdef WITH_IP_BRIDGE
@@ -233,7 +233,7 @@ protected:
 
 public:
   NodePrefs() : ConfigSerializer(), bridge(this),
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
     wifi(this),
 #endif
 #ifdef WITH_IP_BRIDGE
@@ -244,7 +244,7 @@ public:
     password[0] = 0;
     guest_password[0] = 0;
     bridge_secret[0] = 0;
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
     wifi_ssid[0] = 0;
     wifi_pwd[0] = 0;
 #endif
