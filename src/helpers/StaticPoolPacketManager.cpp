@@ -76,7 +76,16 @@ StaticPoolPacketManager::StaticPoolPacketManager(int pool_size): unused(pool_siz
 }
 
 mesh::Packet* StaticPoolPacketManager::allocNew() {
-  return unused.removeByIdx(0);  // just get first one (returns NULL if empty)
+  auto pkt = unused.removeByIdx(0);  // just get first one (returns NULL if empty)
+  if (pkt) {
+    // Reset provenance on every allocation from the pool, regardless of
+    // caller -- pool slots are reused, and a stale _src_bridge left over
+    // from a previous packet that occupied this slot must never leak
+    // forward into an unrelated one. Bridges that DO want to tag a packet
+    // set it explicitly themselves right after this call.
+    pkt->_src_bridge = nullptr;
+  }
+  return pkt;
 }
 
 void StaticPoolPacketManager::free(mesh::Packet* packet) {

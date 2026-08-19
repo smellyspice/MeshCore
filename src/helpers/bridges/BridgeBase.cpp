@@ -41,6 +41,12 @@ void BridgeBase::handleReceivedPacket(mesh::Packet *packet) {
 
   if (!_seen_packets.wasSeen(packet)) {
     _seen_packets.markSeen(packet);
+    // Tag provenance before queuing: this is what lets a reply to this
+    // packet later be routed directly back out this same bridge instead of
+    // requiring a local radio broadcast first (see Packet::_src_bridge).
+    // Safe to set unconditionally -- allocNew() already reset it to null,
+    // and this is the only place a bridge-sourced packet gets queued.
+    packet->_src_bridge = this;
     // bridge_delay provides a buffer to prevent immediate processing conflicts in the mesh network.
     _mgr->queueInbound(packet, millis() + _prefs->bridge_delay);
   } else {

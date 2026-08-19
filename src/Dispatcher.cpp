@@ -372,6 +372,9 @@ void Dispatcher::sendPacket(Packet* packet, uint8_t priority, uint32_t delay_mil
   if (!Packet::isValidPathLen(packet->path_len) || packet->payload_len > MAX_PACKET_PAYLOAD) {
     MESH_DEBUG_PRINTLN("%s Dispatcher::sendPacket(): ERROR: invalid packet... path_len=%d, payload_len=%d", getLogDateTime(), (uint32_t) packet->path_len, (uint32_t) packet->payload_len);
     _mgr->free(packet);
+  } else if (trySendViaBridge(packet)) {
+    // handled directly by a bridge (see MyMesh::trySendViaBridge) -- packet
+    // is already released, must not also queue it for local radio
   } else {
     _mgr->queueOutbound(packet, priority, futureMillis(delay_millis));
   }

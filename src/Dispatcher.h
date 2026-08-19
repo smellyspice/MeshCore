@@ -161,6 +161,14 @@ protected:
   virtual void logRx(Packet* packet, int len, float score) { }   // hooks for custom logging
   virtual void logTx(Packet* packet, int len) { }
   virtual void logTxFail(Packet* packet, int len) { }
+
+  // Called from sendPacket(), after the packet is fully finalized (route
+  // type/transport codes/path all set by the caller) but before it would be
+  // queued for local radio transmission. Return true to indicate the packet
+  // has been fully handled some other way (e.g. sent directly out a bridge)
+  // -- sendPacket() will skip queuing it locally in that case. Default:
+  // never intercepts, so behavior is unchanged unless a subclass overrides.
+  virtual bool trySendViaBridge(Packet* packet) { return false; }
   virtual const char* getLogDateTime() { return ""; }
 
   virtual float getAirtimeBudgetFactor() const;
