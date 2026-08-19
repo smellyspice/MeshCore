@@ -50,6 +50,18 @@ public:
   uint8_t payload[MAX_PACKET_PAYLOAD];
   int8_t _snr;
 
+  // In-memory only, purely local bookkeeping about how THIS node received
+  // this packet -- NEVER part of wire serialization (writeTo/readFrom) and
+  // NEVER included in calculatePacketHash(), so it has zero effect on the
+  // wire protocol or flood dedup. Set by a bridge (see BridgeBase) to itself
+  // when a packet arrives over that bridge; left null for anything received
+  // over radio. Deliberately typed void* rather than a concrete bridge type
+  // so this low-level header doesn't gain a dependency on bridge headers --
+  // callers that care cast it back to AbstractBridge*. Lets a reply to a
+  // bridge-sourced request be routed directly back out that same bridge
+  // instead of always requiring a local radio broadcast first.
+  void* _src_bridge = nullptr;
+
   /**
    * \brief calculate the hash of payload + type
    * \param  dest_hash   destination to store the hash (must be MAX_HASH_SIZE bytes)
