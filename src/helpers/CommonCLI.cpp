@@ -5,7 +5,7 @@
 #include "TxtDataHelpers.h"
 #include <RTClib.h>
 
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
 #endif
 
@@ -767,7 +767,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     savePrefs();
     strcpy(reply, "OK");
 #endif
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   } else if (memcmp(config, "wifi.ssid ", 10) == 0) {
     StrHelper::strncpy(_prefs->wifi_ssid, &config[10], sizeof(_prefs->wifi_ssid));
     savePrefs();
@@ -970,7 +970,7 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "bridge.secret", 13) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_secret);
 #endif
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   } else if (memcmp(config, "wifi.ssid", 9) == 0) {
     sprintf(reply, "> %s", _prefs->wifi_ssid);
   } else if (memcmp(config, "wifi.pwd", 8) == 0) {

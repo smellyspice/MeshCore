@@ -15,9 +15,13 @@
 
 // WiFi STA uplink (internet-bridge groundwork -- see planning/ip-bridge-design.md).
 // Plain internet connectivity only, not the companion TCP protocol -- this board still
-// talks CLI over Serial/ESPNowBridgeRadio same as any other repeater. Credentials are
-// runtime-configurable only (CommonCLI 'set wifi.ssid'/'set wifi.pwd'), never build flags.
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+// talks CLI over Serial/ESPNowBridgeRadio (or the normal LoRa radio) same as any other
+// repeater. Credentials are runtime-configurable only (CommonCLI 'set wifi.ssid'/
+// 'set wifi.pwd'), never build flags. Needed by ESPNOW_BRIDGE_RADIO boards (WiFi STA and
+// ESP-NOW share one radio, so the channel-sync logic below matters) and, independently,
+// by any board -- ESP-NOW-radio or real-LoRa -- that just wants WITH_IP_BRIDGE's WiFi
+// uplink with no ESP-NOW side-channel involved at all.
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
@@ -114,9 +118,23 @@ void setup() {
 
   sensors.begin();
 
+#if defined(ESP32) && defined(WITH_IP_BRIDGE)
+  // MUST happen before the_mesh.begin(fs) below: IpBridge::begin() (called
+  // from within it) opens a listening UDP socket immediately whenever this
+  // board is configured in server role (ip.port set, ip.host empty) --
+  // completely independent of whether WiFi credentials have even been set
+  // yet. That socket call needs WiFi's underlying netif/event-loop/lwIP task
+  // to already exist, or it crashes outright with a lwIP tcpip-task assert
+  // ("Invalid mbox"). On ESPNOW_BRIDGE_RADIO boards this already happens as
+  // a side effect of the ESP-NOW radio's own init in radio_init() above --
+  // harmless/idempotent to call again here. On a real-LoRa board there is no
+  // ESP-NOW init to do it implicitly, so this is the only thing that does.
+  WiFi.mode(WIFI_STA);
+#endif
+
   the_mesh.begin(fs);
 
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   // wifi_ssid is only ever set via 'set wifi.ssid ...' over the CLI (CommonCLI) --
   // never a build flag. Empty means WiFi STA is simply not configured yet.
   if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0) {
@@ -130,6 +148,7 @@ void setup() {
         } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
             MESH_DEBUG_PRINTLN("WiFi connected successfully!");
             wifi_needs_reconnect = false;
+#ifdef ESPNOW_BRIDGE_RADIO
             // WiFi STA and ESP-NOW share one radio and MUST be on the same channel --
             // the AP's channel is authoritative and non-negotiable once associated (see
             // the old NOTE this replaced, and planning/ip-bridge-design.md FR7/FR11).
@@ -139,20 +158,27 @@ void setup() {
             // reflash. No compile-time secret fallback: only push this if bridge.secret
             // has actually been CLI-configured -- an unconfigured board must stay inert
             // rather than have WiFi association silently arm ESP-NOW with a placeholder.
+            // Real-LoRa boards (no ESPNOW_BRIDGE_RADIO) have no ESP-NOW side-channel to
+            // sync at all, so this whole block is irrelevant to them -- WiFi and LoRa are
+            // two entirely independent radios there, nothing to keep in lockstep.
             NodePrefs *prefs = the_mesh.getNodePrefs();
             if (prefs->bridge_secret[0] != 0) {
               radio_driver.setBridgeParams(WiFi.channel(), prefs->bridge_secret);
             }
+#endif
         }
     });
 
     WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
+#ifdef ESPNOW_BRIDGE_RADIO
     // relockChannel() only recovers from the transient PHY reset BLE causes at
     // association time -- it does NOT force the WiFi channel to any particular
     // value (the AP's channel always wins once associated, and it's a no-op
     // anyway if bridge.channel/bridge.secret haven't been configured yet).
-    // Actual channel sync happens above, in ARDUINO_EVENT_WIFI_STA_GOT_IP.
+    // Actual channel sync happens above, in ARDUINO_EVENT_WIFI_STA_GOT_IP. Only
+    // meaningful when ESP-NOW is actually this board's radio -- see note above.
     radio_driver.relockChannel();
+#endif
   }
 #endif
 
@@ -241,7 +267,7 @@ void loop() {
   ui_task.loop();
 #endif
 
-#if defined(ESP32) && defined(ESPNOW_BRIDGE_RADIO)
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   if (wifi_needs_reconnect && (millis() - last_wifi_reconnect_attempt > 10000)) {
     MESH_DEBUG_PRINTLN("Attempting manual WiFi reconnect...");
     WiFi.disconnect();
