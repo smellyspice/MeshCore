@@ -209,6 +209,37 @@ void IpBridge::end() {
   _initialized = false;
 }
 
+void IpBridge::formatStatus(char *reply) const {
+  const char *role = _is_server ? "server" : "client";
+  unsigned long since_rx_secs = _last_rx_at == 0 ? 0 : (millis() - _last_rx_at) / 1000;
+
+  switch (_state) {
+    case State::IDLE:
+      sprintf(reply, "idle (not started)");
+      break;
+    case State::LISTENING:
+      sprintf(reply, "listening (%s), no peer yet", role);
+      break;
+    case State::HANDSHAKING:
+      sprintf(reply, "handshaking (%s)...", role);
+      break;
+    case State::CONNECTED:
+      if (_last_rx_at == 0) {
+        sprintf(reply, "connected (%s), nothing received yet", role);
+      } else {
+        sprintf(reply, "connected (%s), last heard %lus ago", role, since_rx_secs);
+      }
+      break;
+    case State::RECONNECT_WAIT:
+      sprintf(reply, "reconnecting (%s), %u failed attempt%s so far", role,
+              (unsigned)_consecutive_connect_failures, _consecutive_connect_failures == 1 ? "" : "s");
+      break;
+    default:
+      sprintf(reply, "unknown state");
+      break;
+  }
+}
+
 void IpBridge::startListen() {
   char port_str[8];
   snprintf(port_str, sizeof(port_str), "%u", (unsigned)_prefs->ip_port);

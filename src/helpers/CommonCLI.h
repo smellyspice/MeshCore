@@ -300,6 +300,14 @@ public:
     // no op by default
   };
 
+  // For 'get ip.status' -- writes a short human-readable summary into
+  // 'reply' (same no-size-param convention as formatStatsReply() etc) and
+  // returns true if it did. Default false lets CommonCLI report the command
+  // as unsupported on builds without an IpBridge to ask.
+  virtual bool formatIpStatus(char *reply) {
+    return false;
+  };
+
   virtual bool setRxBoostedGain(bool enable) {
     return false; // CommonCLI reports unsupported if not overridden by wrapper
   };

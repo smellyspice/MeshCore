@@ -998,6 +998,11 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     sprintf(reply, "> %d", (uint32_t)_prefs->ip_port);
   } else if (memcmp(config, "ip.secret", 9) == 0) {
     sprintf(reply, "> %s", _prefs->ip_secret);
+  } else if (memcmp(config, "ip.status", 9) == 0) {
+    strcpy(reply, "> ");
+    if (!_callbacks->formatIpStatus(&reply[2])) {
+      strcpy(reply, "Error: ip bridge not active");
+    }
 #endif
   } else if (memcmp(config, "bootloader.ver", 14) == 0) {
   #ifdef NRF52_PLATFORM

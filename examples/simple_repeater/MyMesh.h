@@ -314,6 +314,12 @@ public:
 #endif
   }
 #endif
+#ifdef WITH_IP_BRIDGE
+  bool formatIpStatus(char *reply) override {
+    ip_bridge.formatStatus(reply);
+    return true;
+  }
+#endif
 #if !defined(WITH_BRIDGE) && defined(ESPNOW_BRIDGE_RADIO)
   void restartBridge() override {
     if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {

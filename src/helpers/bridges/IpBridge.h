@@ -71,6 +71,13 @@ public:
   void sendPacket(mesh::Packet *packet) override;
   void onPacketReceived(mesh::Packet *packet) override;
 
+  // Lightweight live-state query for 'get ip.status' -- doesn't need
+  // BRIDGE_DEBUG=1 the way the full handshake/heartbeat tracing does. Writes
+  // a short human-readable summary into 'reply' (caller-owned buffer, same
+  // convention as CommonCLICallbacks::formatStatsReply() etc -- no size
+  // param, caller's buffer is trusted to be large enough).
+  void formatStatus(char *reply) const;
+
 private:
   enum class State : uint8_t {
     IDLE,           // not initialized / stopped
