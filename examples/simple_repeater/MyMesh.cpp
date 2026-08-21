@@ -479,7 +479,15 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 1) {
-    bridge.sendPacket(pkt);
+#ifdef WITH_RS232_BRIDGE
+    rs232_bridge.sendPacket(pkt);
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+    espnow_bridge.sendPacket(pkt);
+#endif
+#ifdef WITH_IP_BRIDGE
+    ip_bridge.sendPacket(pkt);
+#endif
   }
 #endif
 
@@ -505,7 +513,15 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 0) {
-    bridge.sendPacket(pkt);
+#ifdef WITH_RS232_BRIDGE
+    rs232_bridge.sendPacket(pkt);
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+    espnow_bridge.sendPacket(pkt);
+#endif
+#ifdef WITH_IP_BRIDGE
+    ip_bridge.sendPacket(pkt);
+#endif
   }
 #endif
 
@@ -891,14 +907,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
       telemetry(MAX_PACKET_PAYLOAD - 4),
       discover_limiter(4, 120),  // max 4 every 2 minutes
       anon_limiter(4, 180)   // max 4 every 3 minutes
-#if defined(WITH_RS232_BRIDGE)
-      , bridge(&_prefs, WITH_RS232_BRIDGE, _mgr, &rtc)
+#ifdef WITH_RS232_BRIDGE
+      , rs232_bridge(&_prefs, WITH_RS232_BRIDGE, _mgr, &rtc)
 #endif
-#if defined(WITH_ESPNOW_BRIDGE)
-      , bridge(&_prefs, _mgr, &rtc)
+#ifdef WITH_ESPNOW_BRIDGE
+      , espnow_bridge(&_prefs, _mgr, &rtc)
 #endif
-#if defined(WITH_IP_BRIDGE)
-      , bridge(&_prefs, _mgr, &rtc)
+#ifdef WITH_IP_BRIDGE
+      , ip_bridge(&_prefs, _mgr, &rtc)
 #endif
 {
   last_millis = 0;
@@ -1001,7 +1017,15 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
 #if defined(WITH_BRIDGE)
   if (_prefs.bridge_enabled) {
-    bridge.begin();
+#ifdef WITH_RS232_BRIDGE
+    rs232_bridge.begin();
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+    espnow_bridge.begin();
+#endif
+#ifdef WITH_IP_BRIDGE
+    ip_bridge.begin();
+#endif
   }
 #endif
 
@@ -1329,8 +1353,14 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
 }
 
 void MyMesh::loop() {
-#ifdef WITH_BRIDGE
-  bridge.loop();
+#ifdef WITH_RS232_BRIDGE
+  rs232_bridge.loop();
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+  espnow_bridge.loop();
+#endif
+#ifdef WITH_IP_BRIDGE
+  ip_bridge.loop();
 #endif
 
   mesh::Mesh::loop();
@@ -1375,8 +1405,15 @@ void MyMesh::loop() {
 
 // To check if there is pending work
 bool MyMesh::hasPendingWork() const {
-#if defined(WITH_BRIDGE)
-  if (bridge.isRunning()) return true;  // bridge needs WiFi radio, can't sleep
+  // any active bridge needing WiFi/its own radio blocks sleep
+#ifdef WITH_RS232_BRIDGE
+  if (rs232_bridge.isRunning()) return true;
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+  if (espnow_bridge.isRunning()) return true;
+#endif
+#ifdef WITH_IP_BRIDGE
+  if (ip_bridge.isRunning()) return true;
 #endif
   return _mgr->getOutboundTotal() > 0;
 }

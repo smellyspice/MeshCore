@@ -941,17 +941,26 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "role", 4) == 0) {
     sprintf(reply, "> %s", _callbacks->getRole());
   } else if (memcmp(config, "bridge.type", 11) == 0) {
-    sprintf(reply, "> %s",
+    // Each bridge type is independently gated (not an #elif chain) -- more
+    // than one can be active at once, so list all that are compiled in
+    // rather than reporting just the first match.
+    strcpy(reply, "> ");
+    bool any = false;
 #ifdef WITH_RS232_BRIDGE
-            "rs232"
-#elif WITH_ESPNOW_BRIDGE
-            "espnow"
-#elif WITH_IP_BRIDGE
-            "ip"
-#else
-            "none"
+    strcat(reply, "rs232");
+    any = true;
 #endif
-    );
+#ifdef WITH_ESPNOW_BRIDGE
+    if (any) strcat(reply, "+");
+    strcat(reply, "espnow");
+    any = true;
+#endif
+#ifdef WITH_IP_BRIDGE
+    if (any) strcat(reply, "+");
+    strcat(reply, "ip");
+    any = true;
+#endif
+    if (!any) strcat(reply, "none");
 #ifdef WITH_BRIDGE
   } else if (memcmp(config, "bridge.enabled", 14) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_enabled ? "on" : "off");
