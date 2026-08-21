@@ -209,34 +209,72 @@ void IpBridge::end() {
   _initialized = false;
 }
 
-void IpBridge::formatStatus(char *reply) const {
-  const char *role = _is_server ? "server" : "client";
-  unsigned long since_rx_secs = _last_rx_at == 0 ? 0 : (millis() - _last_rx_at) / 1000;
+// Formats the server-side peer address (_client_ip/_client_ip_len, raw bytes
+// from mbedtls_net_accept()) as dotted-decimal. IPv4 only -- this bridge is
+// built on WiFi.hostByName()/IPAddress throughout, never IPv6.
+static void formatPeerIp(const unsigned char *ip, size_t len, char *out) {
+  if (len == 4) {
+    sprintf(out, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+  } else {
+    strcpy(out, "?");
+  }
+}
 
-  switch (_state) {
-    case State::IDLE:
-      sprintf(reply, "idle (not started)");
-      break;
-    case State::LISTENING:
-      sprintf(reply, "listening (%s), no peer yet", role);
-      break;
-    case State::HANDSHAKING:
-      sprintf(reply, "handshaking (%s)...", role);
-      break;
-    case State::CONNECTED:
-      if (_last_rx_at == 0) {
-        sprintf(reply, "connected (%s), nothing received yet", role);
-      } else {
-        sprintf(reply, "connected (%s), last heard %lus ago", role, since_rx_secs);
-      }
-      break;
-    case State::RECONNECT_WAIT:
-      sprintf(reply, "reconnecting (%s), %u failed attempt%s so far", role,
-              (unsigned)_consecutive_connect_failures, _consecutive_connect_failures == 1 ? "" : "s");
-      break;
-    default:
-      sprintf(reply, "unknown state");
-      break;
+void IpBridge::formatStatus(char *reply) const {
+  unsigned long since_rx_secs = _last_rx_at == 0 ? 0 : (millis() - _last_rx_at) / 1000;
+  char peer_ip[20];
+
+  if (_is_server) {
+    switch (_state) {
+      case State::IDLE:
+        sprintf(reply, "idle (not started)");
+        break;
+      case State::LISTENING:
+        sprintf(reply, "listening on port %u, no peer yet", (unsigned)_prefs->ip_port);
+        break;
+      case State::HANDSHAKING:
+        formatPeerIp(_client_ip, _client_ip_len, peer_ip);
+        sprintf(reply, "peer %s attempting handshake...", peer_ip);
+        break;
+      case State::CONNECTED:
+        formatPeerIp(_client_ip, _client_ip_len, peer_ip);
+        if (_last_rx_at == 0) {
+          sprintf(reply, "connected to peer %s, nothing received yet", peer_ip);
+        } else {
+          sprintf(reply, "connected to peer %s, last heard %lus ago", peer_ip, since_rx_secs);
+        }
+        break;
+      default:
+        sprintf(reply, "unknown state");
+        break;
+    }
+  } else {  // client
+    switch (_state) {
+      case State::IDLE:
+        sprintf(reply, "idle (not started)");
+        break;
+      case State::HANDSHAKING:
+        sprintf(reply, "connecting to %s (resolved: %s)...", _prefs->ip_host, _resolved_ip);
+        break;
+      case State::CONNECTED:
+        if (_last_rx_at == 0) {
+          sprintf(reply, "connected to %s (%s), nothing received yet", _prefs->ip_host, _resolved_ip);
+        } else {
+          sprintf(reply, "connected to %s (%s), last heard %lus ago", _prefs->ip_host, _resolved_ip, since_rx_secs);
+        }
+        break;
+      case State::RECONNECT_WAIT:
+        if (_resolved_ip[0] == 0) {
+          sprintf(reply, "DNS lookup failed for %s, retrying...", _prefs->ip_host);
+        } else {
+          sprintf(reply, "reconnecting to %s (%s), %u failed attempt%s so far", _prefs->ip_host, _resolved_ip,
+                  (unsigned)_consecutive_connect_failures, _consecutive_connect_failures == 1 ? "" : "s");
+        }
+        break;
+      default:
+        sprintf(reply, "unknown state");
+        break;
+    }
   }
 }
 
