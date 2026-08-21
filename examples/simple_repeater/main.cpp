@@ -148,35 +148,23 @@ void setup() {
         } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
             MESH_DEBUG_PRINTLN("WiFi connected successfully!");
             wifi_needs_reconnect = false;
-#ifdef ESPNOW_BRIDGE_RADIO
-            // WiFi STA and ESP-NOW share one radio and MUST be on the same channel --
-            // the AP's channel is authoritative and non-negotiable once associated (see
-            // the old NOTE this replaced, and planning/ip-bridge-design.md FR7/FR11).
-            // Rather than requiring the AP to be pinned to a specific channel, just
-            // adopt whatever channel WiFi actually landed on for ESP-NOW too -- this is
-            // what actually keeps them in sync across different sites/APs without a
-            // reflash. No compile-time secret fallback: only push this if bridge.secret
-            // has actually been CLI-configured -- an unconfigured board must stay inert
-            // rather than have WiFi association silently arm ESP-NOW with a placeholder.
-            // Real-LoRa boards (no ESPNOW_BRIDGE_RADIO) have no ESP-NOW side-channel to
-            // sync at all, so this whole block is irrelevant to them -- WiFi and LoRa are
-            // two entirely independent radios there, nothing to keep in lockstep.
-            NodePrefs *prefs = the_mesh.getNodePrefs();
-            if (prefs->bridge_secret[0] != 0) {
-              radio_driver.setBridgeParams(WiFi.channel(), prefs->bridge_secret);
-            }
-#endif
         }
     });
 
     WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
 #ifdef ESPNOW_BRIDGE_RADIO
-    // relockChannel() only recovers from the transient PHY reset BLE causes at
-    // association time -- it does NOT force the WiFi channel to any particular
-    // value (the AP's channel always wins once associated, and it's a no-op
-    // anyway if bridge.channel/bridge.secret haven't been configured yet).
-    // Actual channel sync happens above, in ARDUINO_EVENT_WIFI_STA_GOT_IP. Only
-    // meaningful when ESP-NOW is actually this board's radio -- see note above.
+    // WiFi STA and ESP-NOW share one radio and MUST be on the same channel.
+    // Deliberately NOT auto-synced to whatever WiFi negotiates: that would
+    // let the live channel silently diverge from the 'bridge.channel' CLI
+    // setting (a config value that lies), and wouldn't propagate to any
+    // paired ESP-NOW mini boards either, since each configures its own
+    // channel independently. Instead, the access point's channel must be
+    // static and known at config time, with 'bridge.channel' set to match
+    // it by hand -- see planning/ip-bridge-design.md for the operational
+    // requirement this implies. relockChannel() here only recovers from the
+    // transient PHY reset BLE causes at association time -- it re-asserts
+    // whatever channel 'bridge.channel' already configured (applied earlier
+    // in MyMesh::begin()), it does not read anything back from WiFi.
     radio_driver.relockChannel();
 #endif
   }
