@@ -42,10 +42,6 @@
 #include <helpers/RoutingPolicy.h>
 #include "RateLimiter.h"
 
-#ifdef WITH_BRIDGE
-extern AbstractBridge* bridge;
-#endif
-
 struct RepeaterStats {
   uint16_t batt_milli_volts;
   uint16_t curr_tx_queue_len;
@@ -122,12 +118,20 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint8_t pending_sf;
   uint8_t pending_cr;
   int  matching_peer_indexes[MAX_CLIENTS];
-#if defined(WITH_RS232_BRIDGE)
-  RS232Bridge bridge;
-#elif defined(WITH_ESPNOW_BRIDGE)
-  ESPNowBridge bridge;
-#elif defined(WITH_IP_BRIDGE)
-  IpBridge bridge;
+  // Each bridge type is independently gated (not an #elif chain) so a board
+  // can have more than one active at once -- e.g. WITH_ESPNOW_BRIDGE +
+  // WITH_IP_BRIDGE together on a real-LoRa repeater. Any code that needs to
+  // act on "all active bridges" must touch each member explicitly; there's
+  // no shared base-class array/loop here deliberately, to keep each bridge
+  // trivially optional at compile time with zero cost when not selected.
+#ifdef WITH_RS232_BRIDGE
+  RS232Bridge rs232_bridge;
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+  ESPNowBridge espnow_bridge;
+#endif
+#ifdef WITH_IP_BRIDGE
+  IpBridge ip_bridge;
 #endif
 
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
@@ -245,26 +249,49 @@ public:
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
-    if (enable == bridge.isRunning()) return;
-    if (enable)
-    {
-      bridge.begin();
+    // Each active bridge is checked/toggled independently -- with more than
+    // one compiled in, they can each already be in a different running
+    // state, so there's no single isRunning() to gate on up front the way a
+    // lone bridge could.
+#ifdef WITH_RS232_BRIDGE
+    if (enable != rs232_bridge.isRunning()) {
+      if (enable) rs232_bridge.begin(); else rs232_bridge.end();
     }
-    else 
-    {
-      bridge.end();
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+    if (enable != espnow_bridge.isRunning()) {
+      if (enable) espnow_bridge.begin(); else espnow_bridge.end();
     }
+#endif
+#ifdef WITH_IP_BRIDGE
+    if (enable != ip_bridge.isRunning()) {
+      if (enable) ip_bridge.begin(); else ip_bridge.end();
+    }
+#endif
   }
 
   void restartBridge() override {
-    // Always end()+begin(), not just when already running -- bridge.begin()
+    // Always end()+begin(), not just when already running -- begin()
     // re-validates config and is a safe no-op if still incomplete, but if we
     // only reset an already-running bridge, a board configured entirely via
     // CLI (ip.host/ip.port/ip.secret set one at a time, each triggering this
     // callback) would never actually start until a reboot, since isRunning()
-    // stays false until begin() has already succeeded once.
-    bridge.end();
-    bridge.begin();
+    // stays false until begin() has already succeeded once. Applies to every
+    // active bridge independently -- CommonCLI's 'set ip.*'/'set bridge.*'
+    // handlers all funnel through this same callback regardless of which
+    // bridge's setting actually changed.
+#ifdef WITH_RS232_BRIDGE
+    rs232_bridge.end();
+    rs232_bridge.begin();
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+    espnow_bridge.end();
+    espnow_bridge.begin();
+#endif
+#ifdef WITH_IP_BRIDGE
+    ip_bridge.end();
+    ip_bridge.begin();
+#endif
 #ifdef ESPNOW_BRIDGE_RADIO
     // bridge.channel/bridge.secret (FR11) are the ESPNowBridgeRadio's own
     // channel/secret, unrelated to the `bridge` (IpBridge/etc) member above
