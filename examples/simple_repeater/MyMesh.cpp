@@ -603,23 +603,32 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
 
   if (bridge == NULL) return false;
 
-  // A packet with zero path hops remaining is, by definition, meant for
-  // local delivery -- one more local radio broadcast reaches the actual
-  // destination directly. This is exactly the shape of a freshly-composed
-  // forwarded ACK (see Mesh::routeDirectRecvAcks()) when THIS repeater was
-  // the last hop before the destination companion. Without this check, that
-  // packet gets bounced back out the very bridge it just arrived from
-  // instead of ever reaching the companion -- silently, no log, no error,
-  // deterministically on every send. Confirmed against real hardware
-  // 2026-08-21 (see planning/bridge-direct-routing-path-gap.md) and covered
-  // by test/test_smart_bridge_ack_misroute.
-  if (packet->getPathHashCount() == 0) {
-    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: packet has 0 path hops left (local delivery), NOT redirecting to bridge\n");
+  // DIRECT-route packets always carry their own explicit path[] of real hop
+  // hashes to follow -- letting them fall through to normal local TX (which
+  // then hits logTx()'s mirror-to-every-configured-bridge hook once the send
+  // completes) is what actually gets them to their real next hop, whether
+  // that's this same bridge, a DIFFERENT bridge, or a genuine local LoRa
+  // neighbor. Redirecting straight back out the bridge a packet arrived from
+  // is only correct for FLOOD-route replies with no path of their own and no
+  // other way back to the requester (e.g. sendFloodReply()'s REQ/RESPONSE
+  // and TXT_MSG/CLI-over-chat replies -- see planning/smart-bridge-routing-design.md
+  // §11, both validated working on real hardware). This subsumes the earlier
+  // narrower "0 path hops left" carve-out (a 0-hop-left forwarded ACK is
+  // itself just a DIRECT packet) -- that fix only covered a single-bridge
+  // repeater being the LAST hop; it didn't cover a DIRECT ack still carrying
+  // real hops being relayed *through* a repeater running two bridges at
+  // once, which got bounced back out the wrong one. Confirmed against real
+  // hardware 2026-08-21 (0-hop case) and 2026-08-22 (>0-hop, dual-bridge
+  // case) -- see planning/bridge-direct-routing-path-gap.md -- and covered
+  // by test/test_smart_bridge_ack_misroute and test/test_dual_bridge_ack_mirror.
+  if (packet->isRouteDirect()) {
+    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: DIRECT-route packet (path_hops=%d), NOT redirecting -- has its own path to follow\n",
+                         (int)packet->getPathHashCount());
     return false;
   }
 
-  BRIDGE_DEBUG_PRINTLN("trySendViaBridge: redirecting type=%d back out originating bridge, path_hops=%d\n",
-                       (int)packet->getPayloadType(), (int)packet->getPathHashCount());
+  BRIDGE_DEBUG_PRINTLN("trySendViaBridge: redirecting FLOOD-route type=%d back out originating bridge\n",
+                       (int)packet->getPayloadType());
   ((AbstractBridge *)bridge)->sendPacket(packet);
   releasePacket(packet);   // normally freed after local TX completes -- this path bypasses that entirely
   return true;
