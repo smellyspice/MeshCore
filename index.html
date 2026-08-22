@@ -171,6 +171,33 @@
   }
   .chip.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
 
+  /* ---------- quick links ---------- */
+  .quicklinks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+  }
+  .quicklinks a {
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--ink);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .quicklinks a:hover { border-color: var(--accent); color: var(--accent); }
+  .quicklinks a .arrow { color: var(--ink-faint); }
+  .quicklinks a:hover .arrow { color: var(--accent); }
+
   /* ---------- dividers ---------- */
   .divider {
     display: flex;
@@ -178,6 +205,7 @@
     gap: 0.75rem;
     margin: 3.25rem 0 1.75rem;
     color: var(--ink-faint);
+    scroll-margin-top: 1.5rem;
   }
   .divider .diamond {
     width: 7px; height: 7px;
@@ -423,6 +451,11 @@
       <span class="chip">Real DTLS on the IP hop</span>
       <span class="chip warn">Unmerged personal fork — beta</span>
     </div>
+    <nav class="quicklinks">
+      <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
+    </nav>
   </header>
 
   <div class="diagram" style="margin-top: 2.25rem;">
@@ -467,7 +500,7 @@
     </p>
   </section>
 
-  <div class="divider"><div class="diamond"></div><div class="label">use cases</div><div class="rule"></div></div>
+  <div class="divider" id="use-cases"><div class="diamond"></div><div class="label">use cases</div><div class="rule"></div></div>
 
   <section>
     <div class="usecase">
@@ -635,8 +668,7 @@
   </section>
 
   <footer>
-    <span>Branch: <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">smellyspice/MeshCore &middot; espnow-ip-bridge</a></span>
-    <span>Firmware: <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a></span>
+    <span>A personal MeshCore fork, not an official project or release — see branch and firmware links above.</span>
   </footer>
 </div>
 
