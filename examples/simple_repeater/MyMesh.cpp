@@ -587,6 +587,24 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
 
   if (bridge == NULL) return false;
 
+  // A packet with zero path hops remaining is, by definition, meant for
+  // local delivery -- one more local radio broadcast reaches the actual
+  // destination directly. This is exactly the shape of a freshly-composed
+  // forwarded ACK (see Mesh::routeDirectRecvAcks()) when THIS repeater was
+  // the last hop before the destination companion. Without this check, that
+  // packet gets bounced back out the very bridge it just arrived from
+  // instead of ever reaching the companion -- silently, no log, no error,
+  // deterministically on every send. Found and confirmed live on a
+  // trifecta LoRa+IP-bridge hardware setup (message always delivered, but
+  // the direct-routed ACK back never arrived until the client fell back to
+  // a flood send) -- see test/test_smart_bridge_ack_misroute.
+  if (packet->getPathHashCount() == 0) {
+    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: packet has 0 path hops left (local delivery), NOT redirecting to bridge\n");
+    return false;
+  }
+
+  BRIDGE_DEBUG_PRINTLN("trySendViaBridge: redirecting type=%d back out originating bridge, path_hops=%d\n",
+                       (int)packet->getPayloadType(), (int)packet->getPathHashCount());
   ((AbstractBridge *)bridge)->sendPacket(packet);
   releasePacket(packet);   // normally freed after local TX completes -- this path bypasses that entirely
   return true;
