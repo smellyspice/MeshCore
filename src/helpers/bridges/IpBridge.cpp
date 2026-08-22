@@ -659,8 +659,8 @@ void IpBridge::sendPacket(mesh::Packet *packet) {
     return;
   }
 
-  if (!_seen_packets.wasSeen(packet)) {
-    _seen_packets.markSeen(packet);
+  if (!_tx_seen.wasSeen(packet)) {
+    _tx_seen.markSeen(packet);
 
     uint8_t sizing_buffer[MAX_TRANS_UNIT + 1];
     uint16_t len = packet->writeTo(sizing_buffer);
@@ -669,7 +669,10 @@ void IpBridge::sendPacket(mesh::Packet *packet) {
       return;
     }
 
+    BRIDGE_DEBUG_PRINTLN("TX, len=%d crc=0x%04x\n", len, fletcher16(sizing_buffer, len));
     sendFramed(sizing_buffer, len);
+  } else {
+    BRIDGE_DEBUG_PRINTLN("TX suppressed (already seen), len=%d\n", packet->getRawLength());
   }
 }
 

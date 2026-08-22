@@ -91,6 +91,16 @@ private:
   State _state = State::IDLE;
   unsigned long _next_action_at = 0;
 
+  // BridgeBase's inherited _seen_packets is checked/marked by BOTH the RX
+  // path (handleReceivedPacket(), inherited unchanged) and, by the same
+  // established pattern ESPNowBridge/RS232Bridge use, the TX path. Sharing
+  // one table between the two means a packet that legitimately needs to
+  // cross in one direction can be silently dropped because identical
+  // content already crossed the other way -- no log, no error. Giving TX
+  // its own table here removes that false-positive for this bridge without
+  // touching BridgeBase or the other bridge types.
+  SimpleMeshTables _tx_seen;
+
   // Throttles how often HANDSHAKING polls mbedtls_ssl_handshake(), independent
   // of mbedTLS's own DTLS retransmit backoff (which only paces re-sending the
   // flight, not how often we call in to check). Without this, loop() calls
