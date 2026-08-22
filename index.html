@@ -661,10 +661,16 @@
       </p>
     </div>
 
-    <p style="margin-top: 1.5rem;">
-      Native test suite (no hardware needed) if you want to poke at the
-      logic before flashing anything: <code>pio test --environment native</code>
-    </p>
+    <div class="wave">
+      <span class="wave-tag">No hardware yet?</span>
+      <h3>Poke at the logic first</h3>
+      <p>
+        The native GoogleTest suite runs the real routing code on your
+        machine, no board required — useful if you just want to read
+        through what's being tested before committing to flashing anything.
+      </p>
+      <pre class="cli"><span class="c">$ pio test --environment native</span></pre>
+    </div>
   </section>
 
   <footer>
