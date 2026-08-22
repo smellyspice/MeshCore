@@ -641,13 +641,35 @@
         for a blank one, flash with <code>esptool.py</code>, then configure
         with the same CLI commands above.
       </p>
+    </div>
+
+    <div class="wave">
+      <span class="wave-tag">Optional — no-LoRa companion</span>
+      <h3>Have a Waveshare ESP32-S3-Zero lying around?</h3>
+      <p>
+        This one's a companion with <em>no</em> LoRa radio at all — it joins
+        a trifecta repeater's ESP&#8209;NOW side&#8209;channel as its primary
+        radio, so it uses zero LoRa airtime. Flash it the same way as a
+        repeater (grab
+        <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a>,
+        or <a href="https://github.com/smellyspice/MeshCore/blob/espnow-ip-bridge/README.md">build it yourself</a>),
+        then one extra step: there's no phone-app UI yet for its
+        ESP&#8209;NOW channel/secret, so it needs a small script (also
+        attached to that release) to push them over USB:
+      </p>
+      <pre class="cli"><span class="c"># find the port, then check/set its config</span>
+<span class="k">python3</span> set_bridge_params.py list
+<span class="k">python3</span> set_bridge_params.py &lt;port&gt; get
+<span class="k">python3</span> set_bridge_params.py &lt;port&gt; set 11 &lt;your bridge secret&gt;</pre>
       <p style="margin-top: 0.8rem;">
-        One exception: if you want to test a companion with <em>no</em> LoRa
-        radio joining purely over ESP&#8209;NOW, that specific board needs its
-        bridge channel/secret pushed with a small included script instead —
-        there's no phone-app UI for that yet. Every other role (repeaters,
-        and companions with a LoRa radio talking to a trifecta repeater
-        normally) needs nothing extra at all.
+        Channel and secret have to exactly match what's already set on the
+        repeater you want it to join (<code>get bridge.channel</code> /
+        <code>get bridge.secret</code> on that repeater's own CLI). Applies
+        immediately, no reboot. Needs Python 3 and <code>pip install
+        pyserial</code>. Every other role — repeaters, and companions with
+        their own LoRa radio talking to a trifecta repeater normally —
+        needs nothing extra at all.
       </p>
     </div>
 
