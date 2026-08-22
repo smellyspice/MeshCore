@@ -600,6 +600,15 @@
 <span class="k">set</span> wifi.pwd &lt;your password&gt;
 <span class="k">set</span> ip.host &lt;peer host or IP&gt;</pre>
       <p style="margin-top: 0.8rem;">
+        Don't want to set up PlatformIO? Prebuilt binaries for all three
+        wave&#8209;1 boards are on the
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a>
+        — grab the plain <code>.bin</code> to upgrade an existing board
+        (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
+        for a blank one, flash with <code>esptool.py</code>, then configure
+        with the same CLI commands above.
+      </p>
+      <p style="margin-top: 0.8rem;">
         One exception: if you want to test a companion with <em>no</em> LoRa
         radio joining purely over ESP&#8209;NOW, that specific board needs its
         bridge channel/secret pushed with a small included script instead —
@@ -627,7 +636,7 @@
 
   <footer>
     <span>Branch: <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">smellyspice/MeshCore &middot; espnow-ip-bridge</a></span>
-    <span>Questions or want in on wave 1 — reply in the thread.</span>
+    <span>Firmware: <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a></span>
   </footer>
 </div>
 
