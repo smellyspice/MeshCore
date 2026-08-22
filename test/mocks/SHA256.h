@@ -30,6 +30,18 @@ public:
     }
   }
 
+  // Previously both no-ops: finalizeHMAC never wrote its output buffer, so
+  // MACThenDecrypt()'s HMAC comparison always compared against uninitialized
+  // stack garbage on both sides and (astronomically reliably) never matched
+  // -- meaning any test exercising real encrypted payload decrypt (TXT_MSG/
+  // REQ/RESPONSE/PATH) would silently fail before ever reaching application
+  // logic. Deterministic but not cryptographic, same spirit as finalize()
+  // above: real enough to round-trip correctly for two parties sharing the
+  // same key, wrong for anyone who doesn't.
   void resetHMAC(const uint8_t* key, size_t keyLen) {}
-  void finalizeHMAC(const uint8_t* key, size_t keyLen, uint8_t* hash, size_t hashLen) {}
+  void finalizeHMAC(const uint8_t* key, size_t keyLen, uint8_t* hash, size_t hashLen) {
+    for (size_t i = 0; i < hashLen; i++) {
+      hash[i] = _state[i % 32] ^ key[i % keyLen];
+    }
+  }
 };
