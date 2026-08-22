@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trifecta Bridge</title>
+<meta name="description" content="Recruiting doc for MeshCore's trifecta LoRa/ESP-NOW/IP bridge fork — use cases, security posture, and limitations for beta testers.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg: #EEF1F0;
+    --surface: #FFFFFF;
+    --surface-2: #E4E9E7;
+    --ink: #16221F;
+    --ink-dim: #4B5D59;
+    --ink-faint: #7C8B87;
+    --line: #D6DEDC;
+    --accent: #0E7C7B;
+    --accent-ink: #FFFFFF;
+    --amber: #A5650F;
+    --amber-bg: #F6E9D6;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0E1613;
+      --surface: #16211D;
+      --surface-2: #1E2A25;
+      --ink: #E7EFEC;
+      --ink-dim: #93A39D;
+      --ink-faint: #647A73;
+      --line: #263631;
+      --accent: #4FD1C8;
+      --accent-ink: #0B1614;
+      --amber: #E3A34B;
+      --amber-bg: #2B2013;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1613;
+    --surface: #16211D;
+    --surface-2: #1E2A25;
+    --ink: #E7EFEC;
+    --ink-dim: #93A39D;
+    --ink-faint: #647A73;
+    --line: #263631;
+    --accent: #4FD1C8;
+    --accent-ink: #0B1614;
+    --amber: #E3A34B;
+    --amber-bg: #2B2013;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    font-size: 16px;
+  }
+
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--mono);
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  code, pre, kbd {
+    font-family: var(--mono);
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+    position: relative;
+  }
+
+  /* ---------- signal rail ---------- */
+  .rail {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1.5rem;
+    display: none;
+  }
+  @media (min-width: 900px) {
+    .page { padding-left: 2.5rem; }
+    .rail { display: block; left: -0.5rem; }
+  }
+  .rail::before {
+    content: "";
+    position: absolute;
+    left: 3px; top: 6.5rem; bottom: 4rem;
+    width: 1px;
+    background: var(--line);
+  }
+  .rail .node {
+    position: absolute;
+    left: 0;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+  }
+
+  /* ---------- header ---------- */
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .kicker::before {
+    content: "";
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  h1.title {
+    font-size: clamp(2.1rem, 5vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+  }
+
+  .pitch {
+    font-size: 1.15rem;
+    color: var(--ink-dim);
+    max-width: 46em;
+    margin-top: 1rem;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink-dim);
+    background: var(--surface);
+  }
+  .chip.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+
+  /* ---------- dividers ---------- */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 3.25rem 0 1.75rem;
+    color: var(--ink-faint);
+  }
+  .divider .diamond {
+    width: 7px; height: 7px;
+    background: var(--accent);
+    transform: rotate(45deg);
+    flex: none;
+  }
+  .divider .rule { flex: 1; height: 1px; background: var(--line); }
+  .divider .label {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  section > h2 { font-size: 1.5rem; margin-bottom: 1rem; }
+  section p { margin: 0 0 1rem; max-width: 62ch; }
+  section p:last-child { margin-bottom: 0; }
+
+  .lede {
+    font-size: 1.05rem;
+    color: var(--ink-dim);
+  }
+
+  /* ---------- status table ---------- */
+  .status-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    margin: 1.25rem 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .status-table th, .status-table td {
+    text-align: left;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .status-table th {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    background: var(--surface-2);
+  }
+  .status-table tr:last-child td { border-bottom: none; }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .tag.existing { color: var(--ink-dim); background: var(--surface-2); }
+  .tag.new { color: var(--accent-ink); background: var(--accent); }
+
+  /* ---------- diagram ---------- */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+  }
+  .diagram pre {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--ink-dim);
+    white-space: pre;
+  }
+  .diagram pre .hl { color: var(--accent); }
+  .diagram .cap {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: 0.9rem;
+  }
+
+  /* ---------- use cases ---------- */
+  .usecase {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 1.4rem 1.5rem;
+    margin-bottom: 1.1rem;
+  }
+  .usecase-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    margin-bottom: 0.6rem;
+  }
+  .usecase-num {
+    font-family: var(--mono);
+    color: var(--ink-faint);
+    font-size: 0.85rem;
+  }
+  .usecase h3 { font-size: 1.08rem; }
+  .usecase-diagram {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    margin: 0.8rem 0 0.7rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .usecase-diagram .hl { color: var(--accent); }
+
+  /* ---------- callout ---------- */
+  .callout {
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .callout h3 {
+    font-size: 0.95rem;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+  }
+  .callout p { max-width: none; font-size: 0.95rem; }
+  .callout ul { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.95rem; }
+  .callout li { margin-bottom: 0.35rem; }
+  .callout li:last-child { margin-bottom: 0; }
+
+  /* ---------- limitations ---------- */
+  .limit {
+    display: flex;
+    gap: 0.9rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .limit:last-child { border-bottom: none; }
+  .limit-mark {
+    flex: none;
+    min-width: 2.1rem;
+    height: 1.6rem;
+    padding: 0 0.35rem;
+    border-radius: 5px;
+    background: var(--amber-bg);
+    color: var(--amber);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    margin-top: 0.1rem;
+  }
+  .limit-body h3 {
+    font-size: 0.98rem;
+    font-family: var(--sans);
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+  .limit-body p { font-size: 0.93rem; color: var(--ink-dim); max-width: 60ch; }
+
+  /* ---------- involvement ---------- */
+  .wave {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 1rem;
+    padding: 1.25rem 1.5rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    margin-bottom: 1rem;
+  }
+  .wave-tag {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    grid-column: 1 / -1;
+  }
+  .wave h3 { grid-column: 1 / -1; font-size: 1.05rem; margin-top: 0.15rem; }
+  .wave p { grid-column: 1 / -1; margin: 0; font-size: 0.93rem; color: var(--ink-dim); }
+  .wave code { font-size: 0.85rem; }
+
+  pre.cli {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    font-size: 0.83rem;
+    overflow-x: auto;
+    color: var(--ink);
+    margin: 0.75rem 0 0;
+  }
+  pre.cli .c { color: var(--ink-faint); }
+  pre.cli .k { color: var(--accent); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.85rem;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  footer a { color: var(--ink-dim); }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="rail" aria-hidden="true">
+    <div class="node" style="top: 6.5rem;"></div>
+    <div class="node" style="top: 22%;"></div>
+    <div class="node" style="top: 42%;"></div>
+    <div class="node" style="top: 62%;"></div>
+    <div class="node" style="top: 80%;"></div>
+  </div>
+
+  <header>
+    <div class="kicker">MeshCore &middot; community fork &middot; espnow-ip-bridge</div>
+    <h1 class="title">Trifecta Bridge</h1>
+    <p class="pitch">
+      One repeater, three legs at once — real LoRa, an ESP&#8209;NOW side&#8209;channel,
+      and a new encrypted IP bridge — so companions and other repeaters can
+      reach your mesh without all fighting over the same airtime.
+    </p>
+    <div class="chips">
+      <span class="chip">ESP32 only</span>
+      <span class="chip">Opt-in, per bridge</span>
+      <span class="chip">Real DTLS on the IP hop</span>
+      <span class="chip warn">Unmerged personal fork — beta</span>
+    </div>
+  </header>
+
+  <div class="diagram" style="margin-top: 2.25rem;">
+<pre>          local LoRa mesh
+                 |
+                 v
+    +-------------------------+
+    |    trifecta repeater    |<span class="hl">----ESP-NOW---&gt;</span>  companion
+    |    (real LoRa radio)    |                  (no LoRa radio)
+    +------------+------------+
+                 |
+          <span class="hl">IP bridge, DTLS</span>
+                 |
+                 v
+   another trifecta repeater -- anywhere
+   with WiFi and a route back to it</pre>
+    <div class="cap">the shape this branch adds</div>
+  </div>
+
+  <div class="divider"><div class="diamond"></div><div class="label">what's actually new</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      MeshCore already has an ESP&#8209;NOW repeater&#8209;to&#8209;repeater bridge. This
+      branch doesn't reinvent that — it adds the three pieces that make a
+      trifecta node possible, plus a new way for a companion to skip LoRa
+      entirely.
+    </p>
+    <table class="status-table">
+      <tr><th>Piece</th><th>Status</th></tr>
+      <tr><td>ESP&#8209;NOW bridge, repeater&nbsp;&harr;&nbsp;repeater</td><td><span class="tag existing">already in MeshCore</span></td></tr>
+      <tr><td>IP bridge — WiFi + DTLS, repeater&nbsp;&harr;&nbsp;repeater or site&nbsp;&harr;&nbsp;site</td><td><span class="tag new">new, this branch</span></td></tr>
+      <tr><td>Running multiple bridges at once on one repeater ("trifecta")</td><td><span class="tag new">new, this branch</span></td></tr>
+      <tr><td>Companion with <em>no</em> LoRa radio, joining purely over ESP&#8209;NOW</td><td><span class="tag new">new, this branch</span></td></tr>
+    </table>
+    <p>
+      That last one is the one worth pausing on: a companion board like a
+      Waveshare ESP32&#8209;S3&#8209;Zero can join a trifecta repeater's ESP&#8209;NOW
+      side&#8209;channel <em>as its primary radio</em> — no LoRa chip, no LoRa
+      airtime used, no LoRa collisions contributed. It just shows up as
+      another node on the mesh.
+    </p>
+  </section>
+
+  <div class="divider"><div class="diamond"></div><div class="label">use cases</div><div class="rule"></div></div>
+
+  <section>
+    <div class="usecase">
+      <div class="usecase-head"><span class="usecase-num">01</span><h3>Keep small devices off LoRa entirely</h3></div>
+      <p>
+        A well-placed repeater handles the real LoRa mesh; nearby companions
+        that don't need LoRa range — a desk node, a phone-adjacent client, a
+        sensor — join over ESP&#8209;NOW instead. They stop consuming LoRa
+        airtime and stop contributing to collisions, without losing mesh
+        connectivity.
+      </p>
+      <div class="usecase-diagram">companion (no LoRa) <span class="hl">--ESP-NOW--&gt;</span> trifecta repeater <span class="hl">--LoRa--&gt;</span> rest of mesh</div>
+    </div>
+
+    <div class="usecase">
+      <div class="usecase-head"><span class="usecase-num">02</span><h3>Get the repeater itself deep into a building</h3></div>
+      <p>
+        This one isn't about getting companions off LoRa — it's about the
+        repeater's own backhaul. Place a trifecta repeater wherever WiFi or
+        ethernet reaches, even somewhere LoRa can't escape the structure, and
+        let it bridge back to the outside mesh over IP. Companions inside the
+        building still reach it the normal way — LoRa (fine at indoor range)
+        or ESP&#8209;NOW.
+      </p>
+      <div class="usecase-diagram">indoor trifecta repeater <span class="hl">--IP/WiFi--&gt;</span> outside repeater <span class="hl">--LoRa--&gt;</span> rest of mesh
+   &uarr; local companions join here over LoRa or ESP-NOW as usual</div>
+    </div>
+
+    <div class="usecase">
+      <div class="usecase-head"><span class="usecase-num">03</span><h3>Seed a greenfield deployment</h3></div>
+      <p>
+        Drop a repeater into an area with no LoRa neighbours yet. It can't
+        reach the main net on its own — but it can bridge to another
+        trifecta repeater over IP right away, so it's useful from day one.
+        As more local repeaters go up around it and start hearing each
+        other over real LoRa, the IP link quietly becomes redundant instead
+        of load-bearing.
+      </p>
+      <div class="usecase-diagram">new area, no LoRa neighbours yet
+  seed repeater <span class="hl">--IP, over the internet--&gt;</span> established trifecta repeater
+  (later: local repeaters link up over LoRa; the IP hop becomes optional)</div>
+    </div>
+
+    <div class="usecase">
+      <div class="usecase-head"><span class="usecase-num">04</span><h3>Link sites over your own network, no internet involved</h3></div>
+      <p>
+        Same IP bridge, different transport: an organization with two
+        buildings can link them over a private LAN or VPN instead of the
+        public internet — no port forwarding, no internet exposure at all,
+        just one unified mesh across sites.
+      </p>
+      <div class="usecase-diagram">building A trifecta repeater <span class="hl">--IP, private LAN/VPN--&gt;</span> building B trifecta repeater</div>
+    </div>
+  </section>
+
+  <div class="divider"><div class="diamond"></div><div class="label">on letting the internet near your mesh</div><div class="rule"></div></div>
+
+  <section>
+    <p>
+      Worth stating plainly, since it's a natural first question about any
+      bridge that touches the internet.
+    </p>
+    <div class="callout">
+      <h3>It's an intentional point-to-point link, not a public portal</h3>
+      <ul>
+        <li>Nothing changes for a LoRa-only node. The bridge only exists on repeaters that explicitly enable it.</li>
+        <li>The IP hop is authenticated and encrypted with real DTLS — the same audited TLS machinery (mbedTLS) HTTPS runs on, over UDP, using a pre-shared key.</li>
+        <li>It's exactly two fixed peers per link. There's no mode where it accepts connections from anyone who doesn't already have the key.</li>
+      </ul>
+      <p style="margin-top: 0.9rem;">
+        One honest asymmetry worth knowing: the ESP&#8209;NOW bridge's own
+        secret is <em>not</em> real cryptography — it's a simple isolation
+        token, fine for a trusted local network, not something to rely on
+        the way you'd rely on the IP bridge's key. Treat ESP&#8209;NOW-bridged
+        traffic as trusted-local, the same way you'd treat un-encrypted LoRa.
+      </p>
+    </div>
+  </section>
+
+  <div class="divider"><div class="diamond"></div><div class="label">limitations</div><div class="rule"></div></div>
+
+  <section>
+    <div class="limit">
+      <div class="limit-mark">32</div>
+      <div class="limit-body">
+        <h3>ESP32 boards only</h3>
+        <p>Both ESP&#8209;NOW and the IP bridge (WiFi + mbedTLS) are Espressif-specific. Nothing here touches nRF52, RP2040, or STM32 boards.</p>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="limit-mark">RF</div>
+      <div class="limit-body">
+        <h3>ESP-NOW and WiFi share one radio, one fixed channel</h3>
+        <p>On a trifecta repeater, ESP&#8209;NOW and the IP bridge's WiFi connection have to agree on one static channel — no auto-hopping APs. We've run this combination successfully in our own testing, but haven't stress-tested it across a wide range of routers yet.</p>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="limit-mark">NAT</div>
+      <div class="limit-body">
+        <h3>Port forwarding — but only on one side</h3>
+        <p>Only the hub side of an IP bridge link needs one UDP port forwarded. The other side dials out and works behind any standard NAT with zero config. If your hub-side ISP uses CGNAT, port forwarding won't be possible there — you'd need a small VPS or similar instead.</p>
+      </div>
+    </div>
+    <div class="limit">
+      <div class="limit-mark">git</div>
+      <div class="limit-body">
+        <h3>This is a personal fork, not upstream MeshCore</h3>
+        <p>Nothing here has been merged or reviewed by the MeshCore maintainers. It's beta-stage, tested so far on Xiao S3 WIO and Heltec V3/V4, and there are still open validation items in the design notes. The plan is to open a PR against upstream MeshCore once it's had enough real-world testing and validation to be worth proposing — that's exactly what this round of testing is for.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">Two waves, deliberately — starting narrow with boards we've already validated.</p>
+
+    <div class="wave">
+      <span class="wave-tag">Wave 1 — now</span>
+      <h3>You already have a Xiao S3 WIO or Heltec V3/V4</h3>
+      <p>
+        These are the boards this has actually run on as a trifecta
+        repeater. Everything's configurable from the standard MeshCore
+        serial CLI — no custom tooling, no special client:
+      </p>
+      <pre class="cli"><span class="c">$ pio run -e Xiao_S3_WIO_repeater_bridge_espnow_ip -t upload</span>
+<span class="k">set</span> bridge.channel 11
+<span class="k">set</span> bridge.secret &lt;your key&gt;
+<span class="k">set</span> wifi.ssid &lt;your ssid&gt;
+<span class="k">set</span> wifi.pwd &lt;your password&gt;
+<span class="k">set</span> ip.host &lt;peer host or IP&gt;</pre>
+      <p style="margin-top: 0.8rem;">
+        One exception: if you want to test a companion with <em>no</em> LoRa
+        radio joining purely over ESP&#8209;NOW, that specific board needs its
+        bridge channel/secret pushed with a small included script instead —
+        there's no phone-app UI for that yet. Every other role (repeaters,
+        and companions with a LoRa radio talking to a trifecta repeater
+        normally) needs nothing extra at all.
+      </p>
+    </div>
+
+    <div class="wave">
+      <span class="wave-tag">Wave 2 — once we've shaken out the basics</span>
+      <h3>Other ESP32 boards, broader testing</h3>
+      <p>
+        Building from source via PlatformIO for now. Prebuilt, flash-and-go
+        images for more boards are on the list once wave 1 turns up
+        anything that needs fixing first.
+      </p>
+    </div>
+
+    <p style="margin-top: 1.5rem;">
+      Native test suite (no hardware needed) if you want to poke at the
+      logic before flashing anything: <code>pio test --environment native</code>
+    </p>
+  </section>
+
+  <footer>
+    <span>Branch: <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">smellyspice/MeshCore &middot; espnow-ip-bridge</a></span>
+    <span>Questions or want in on wave 1 — reply in the thread.</span>
+  </footer>
+</div>
+
+</body>
+</html>
