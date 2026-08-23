@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trifecta Bridge</title>
-<meta name="description" content="Recruiting doc for MeshCore's trifecta LoRa/ESP-NOW/IP bridge fork — use cases, security posture, and limitations for beta testers.">
+<meta name="description" content="Recruiting doc for MeshCore's Trifecta LoRa/ESP-NOW/IP bridge fork — use cases, security posture, and limitations for beta testers.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 
@@ -463,14 +463,14 @@
                  |
                  v
     +-------------------------+
-    |    trifecta repeater    |<span class="hl">----ESP-NOW---&gt;</span>  companion
+    |    Trifecta repeater    |<span class="hl">----ESP-NOW---&gt;</span>  companion
     |    (real LoRa radio)    |                  (no LoRa radio)
     +------------+------------+
                  |
           <span class="hl">IP bridge, DTLS</span>
                  |
                  v
-   another trifecta repeater -- anywhere
+   another Trifecta repeater -- anywhere
    with WiFi and a route back to it</pre>
     <div class="cap">the shape this branch adds</div>
   </div>
@@ -481,19 +481,19 @@
     <p class="lede">
       MeshCore already has an ESP&#8209;NOW repeater&#8209;to&#8209;repeater bridge. This
       branch doesn't reinvent that — it adds the three pieces that make a
-      trifecta node possible, plus a new way for a companion to skip LoRa
+      Trifecta node possible, plus a new way for a companion to skip LoRa
       entirely.
     </p>
     <table class="status-table">
       <tr><th>Piece</th><th>Status</th></tr>
       <tr><td>ESP&#8209;NOW bridge, repeater&nbsp;&harr;&nbsp;repeater</td><td><span class="tag existing">already in MeshCore</span></td></tr>
-      <tr><td>IP bridge — WiFi + DTLS, repeater&nbsp;&harr;&nbsp;repeater or site&nbsp;&harr;&nbsp;site</td><td><span class="tag new">new, this branch</span></td></tr>
-      <tr><td>Running multiple bridges at once on one repeater ("trifecta")</td><td><span class="tag new">new, this branch</span></td></tr>
+      <tr><td>IP bridge — WiFi + DTLS, repeater&nbsp;&harr;&nbsp;repeater or site&nbsp;&harr;&nbsp;site over any IP network</td><td><span class="tag new">new, this branch</span></td></tr>
+      <tr><td>Running multiple bridges at once on one repeater ("Trifecta")</td><td><span class="tag new">new, this branch</span></td></tr>
       <tr><td>Companion with <em>no</em> LoRa radio, joining purely over ESP&#8209;NOW</td><td><span class="tag new">new, this branch</span></td></tr>
     </table>
     <p>
       That last one is the one worth pausing on: a companion board like a
-      Waveshare ESP32&#8209;S3&#8209;Zero can join a trifecta repeater's ESP&#8209;NOW
+      Waveshare ESP32&#8209;S3&#8209;Zero can join a Trifecta repeater's ESP&#8209;NOW
       side&#8209;channel <em>as its primary radio</em> — no LoRa chip, no LoRa
       airtime used, no LoRa collisions contributed. It just shows up as
       another node on the mesh.
@@ -512,20 +512,20 @@
         airtime and stop contributing to collisions, without losing mesh
         connectivity.
       </p>
-      <div class="usecase-diagram">companion (no LoRa) <span class="hl">--ESP-NOW--&gt;</span> trifecta repeater <span class="hl">--LoRa--&gt;</span> rest of mesh</div>
+      <div class="usecase-diagram">companion (no LoRa) <span class="hl">--ESP-NOW--&gt;</span> Trifecta repeater <span class="hl">--LoRa--&gt;</span> rest of mesh</div>
     </div>
 
     <div class="usecase">
       <div class="usecase-head"><span class="usecase-num">02</span><h3>Get the repeater itself deep into a building</h3></div>
       <p>
         This one isn't about getting companions off LoRa — it's about the
-        repeater's own backhaul. Place a trifecta repeater wherever WiFi or
+        repeater's own backhaul. Place a Trifecta repeater wherever WiFi or
         ethernet reaches, even somewhere LoRa can't escape the structure, and
         let it bridge back to the outside mesh over IP. Companions inside the
         building still reach it the normal way — LoRa (fine at indoor range)
         or ESP&#8209;NOW.
       </p>
-      <div class="usecase-diagram">indoor trifecta repeater <span class="hl">--IP/WiFi--&gt;</span> outside repeater <span class="hl">--LoRa--&gt;</span> rest of mesh
+      <div class="usecase-diagram">indoor Trifecta repeater <span class="hl">--IP/WiFi--&gt;</span> outside repeater <span class="hl">--LoRa--&gt;</span> rest of mesh
    &uarr; local companions join here over LoRa or ESP-NOW as usual</div>
     </div>
 
@@ -534,34 +534,36 @@
       <p>
         Drop a repeater into an area with no LoRa neighbours yet. It can't
         reach the main net on its own — but it can bridge to another
-        trifecta repeater over IP right away, so it's useful from day one.
-        As more local repeaters go up around it and start hearing each
-        other over real LoRa, the IP link quietly becomes redundant instead
-        of load-bearing.
+        Trifecta repeater over another available IP link right away, so it's
+        useful from day one. As more local repeaters go up around it and
+        start hearing each other over real LoRa, the IP link quietly
+        becomes redundant instead of load-bearing.
       </p>
       <div class="usecase-diagram">new area, no LoRa neighbours yet
-  seed repeater <span class="hl">--IP, over the internet--&gt;</span> established trifecta repeater
+  seed repeater <span class="hl">--IP link--&gt;</span> established Trifecta repeater
   (later: local repeaters link up over LoRa; the IP hop becomes optional)</div>
     </div>
 
     <div class="usecase">
-      <div class="usecase-head"><span class="usecase-num">04</span><h3>Link sites over your own network, no internet involved</h3></div>
+      <div class="usecase-head"><span class="usecase-num">04</span><h3>Link sites without touching any outside IP network</h3></div>
       <p>
-        Same IP bridge, different transport: an organization with two
-        buildings can link them over a private LAN or VPN instead of the
-        public internet — no port forwarding, no internet exposure at all,
-        just one unified mesh across sites.
+        Same IP bridge, entirely different transport: an organization with
+        two buildings can link them over a private LAN or VPN, or over
+        their own point&#8209;to&#8209;point radio (microwave, 60&nbsp;GHz, whatever
+        they've already got) — no port forwarding, no outside IP network
+        exposure at all, just one unified mesh across sites.
       </p>
-      <div class="usecase-diagram">building A trifecta repeater <span class="hl">--IP, private LAN/VPN--&gt;</span> building B trifecta repeater</div>
+      <div class="usecase-diagram">building A Trifecta repeater <span class="hl">--IP link--&gt;</span> building B Trifecta repeater</div>
     </div>
   </section>
 
-  <div class="divider"><div class="diamond"></div><div class="label">on letting the internet near your mesh</div><div class="rule"></div></div>
+  <div class="divider"><div class="diamond"></div><div class="label">on trusting what's on the other end of an IP link</div><div class="rule"></div></div>
 
   <section>
     <p>
-      Worth stating plainly, since it's a natural first question about any
-      bridge that touches the internet.
+      Most of the use cases above don't touch any outside IP network at all —
+      but for the ones that do, it's worth stating plainly, since it's a
+      natural first question.
     </p>
     <div class="callout">
       <h3>It's an intentional point-to-point link, not a public portal</h3>
@@ -570,13 +572,6 @@
         <li>The IP hop is authenticated and encrypted with real DTLS — the same audited TLS machinery (mbedTLS) HTTPS runs on, over UDP, using a pre-shared key.</li>
         <li>It's exactly two fixed peers per link. There's no mode where it accepts connections from anyone who doesn't already have the key.</li>
       </ul>
-      <p style="margin-top: 0.9rem;">
-        One honest asymmetry worth knowing: the ESP&#8209;NOW bridge's own
-        secret is <em>not</em> real cryptography — it's a simple isolation
-        token, fine for a trusted local network, not something to rely on
-        the way you'd rely on the IP bridge's key. Treat ESP&#8209;NOW-bridged
-        traffic as trusted-local, the same way you'd treat un-encrypted LoRa.
-      </p>
     </div>
   </section>
 
@@ -594,7 +589,7 @@
       <div class="limit-mark">RF</div>
       <div class="limit-body">
         <h3>ESP-NOW and WiFi share one radio, one fixed channel</h3>
-        <p>On a trifecta repeater, ESP&#8209;NOW and the IP bridge's WiFi connection have to agree on one static channel — no auto-hopping APs. We've run this combination successfully in our own testing, but haven't stress-tested it across a wide range of routers yet.</p>
+        <p>On a Trifecta repeater, ESP&#8209;NOW and the IP bridge's WiFi connection have to agree on one static channel — no auto-hopping APs. We've run this combination successfully in our own testing, but haven't stress-tested it across a wide range of routers yet.</p>
       </div>
     </div>
     <div class="limit">
@@ -622,7 +617,7 @@
       <span class="wave-tag">Wave 1 — now</span>
       <h3>You already have a Xiao S3 WIO or Heltec V3/V4</h3>
       <p>
-        These are the boards this has actually run on as a trifecta
+        These are the boards this has actually run on as a Trifecta
         repeater. Everything's configurable from the standard MeshCore
         serial CLI — no custom tooling, no special client:
       </p>
@@ -648,7 +643,7 @@
       <h3>Have a Waveshare ESP32-S3-Zero lying around?</h3>
       <p>
         This one's a companion with <em>no</em> LoRa radio at all — it joins
-        a trifecta repeater's ESP&#8209;NOW side&#8209;channel as its primary
+        a Trifecta repeater's ESP&#8209;NOW side&#8209;channel as its primary
         radio, so it uses zero LoRa airtime. Flash it the same way as a
         repeater (grab
         <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
@@ -668,7 +663,7 @@
         <code>get bridge.secret</code> on that repeater's own CLI). Applies
         immediately, no reboot. Needs Python 3 and <code>pip install
         pyserial</code>. Every other role — repeaters, and companions with
-        their own LoRa radio talking to a trifecta repeater normally —
+        their own LoRa radio talking to a Trifecta repeater normally —
         needs nothing extra at all.
       </p>
     </div>
