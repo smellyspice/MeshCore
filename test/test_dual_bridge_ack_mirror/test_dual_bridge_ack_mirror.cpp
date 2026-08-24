@@ -175,6 +175,19 @@ protected:
     if (bridge == nullptr) return false;
 
     if (packet->isRouteDirect()) {
+      // MyMesh.cpp's current gate (see planning/ip-bridge-mesh-safety.md
+      // gap #4): a freshly-composed zero-hop reply, for any payload type
+      // that can never reach here as Mesh::routeDirectRecvAcks()'s
+      // decremented relay-in-transit shape (ACK/MULTIPART), can safely be
+      // answered bridge-only -- path_len==0 unambiguously names the peer
+      // we just heard from as the destination.
+      if (packet->getPathHashCount() == 0 &&
+          packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
+          packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
+        ((AbstractBridge*)bridge)->sendPacket(packet);
+        releasePacket(packet);
+        return true;
+      }
       return false;   // has its own path[] to follow -- fall through to normal local TX (-> logTx mirror)
     }
 
@@ -224,6 +237,19 @@ Packet makeDirectAckWithOneMoreHop(uint8_t self_hash, uint8_t next_hop_hash) {
   uint32_t ack_crc = 0xDEADBEEF;
   memcpy(p.payload, &ack_crc, 4);
   p.payload_len = 4;
+  return p;
+}
+
+// A DIRECT, zero-hop RESPONSE -- the shape of onAnonDataRecv()'s admin/CLI
+// reply (createDatagram(PAYLOAD_TYPE_RESPONSE,...) + sendDirect(reply,
+// client->out_path,...) with out_path_len==0), never a relay-in-transit.
+Packet* makeZeroHopDirectResponse() {
+  Packet* p = new Packet();
+  p->header = ROUTE_TYPE_DIRECT | (PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT);
+  p->path_len = 0;
+  uint8_t body[4] = {5, 6, 7, 8};
+  memcpy(p->payload, body, sizeof(body));
+  p->payload_len = sizeof(body);
   return p;
 }
 
@@ -332,6 +358,49 @@ TEST(DualBridgeAckMirror, FloodReplyStillRedirectsBackOutOriginatingBridge) {
       << "a FLOOD-route reply with no path of its own must still be "
          "redirected back out the bridge it arrived from";
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+}
+
+// The fix under test (planning/ip-bridge-mesh-safety.md gap #4): a
+// zero-hop DIRECT admin/CLI reply, generated in response to a request that
+// arrived via the bridge, must go bridge-only -- the observed live symptom
+// was Ra2's LoRa radio keying on every admin/CLI request from a companion
+// reachable ONLY through the ESPNOW+IP bridge chain (no radio on that end
+// at all), a pure waste of airtime nobody could ever receive.
+TEST(DualBridgeAckMirror, ZeroHopDirectResponseFromBridgeRedirectsBridgeOnly) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.ip_bridge;   // as if just processed a bridge-sourced admin request
+
+  repeater.sendPacket(makeZeroHopDirectResponse(), 0, 0);
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "a zero-hop DIRECT reply to a bridge-sourced request must be answered "
+         "bridge-only -- its destination has no radio to receive a local TX";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+}
+
+// Regression guard for the fix above: it must NOT widen to cover ACK, since
+// PAYLOAD_TYPE_ACK is the one payload type that can ALSO reach
+// trySendViaBridge() as Mesh::routeDirectRecvAcks()'s decremented
+// relay-in-transit shape (see SingleBridgeZeroHopFallsThroughToLocalTxAndMirrors
+// and ZeroHopAckFromIpBridgeStillReachesEspNowBridge above) -- indistinguishable
+// from a fresh reply by payload type + path_len alone, so ACK must keep
+// falling through to real local TX unconditionally, even zero-hop.
+TEST(DualBridgeAckMirror, ZeroHopDirectAckFromBridgeStillFallsThrough) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
+
+  Packet* ack = new Packet();
+  ack->header = ROUTE_TYPE_DIRECT | (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+  ack->path_len = 0;
+  uint32_t ack_crc = 0xDEADBEEF;
+  memcpy(ack->payload, &ack_crc, 4);
+  ack->payload_len = 4;
+
+  repeater.sendPacket(ack, 0, 0);
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 0)
+      << "ACK must never be bridge-redirected by the zero-hop DIRECT fix -- "
+         "only real local TX (+ logTx's separate mirror) is safe for it";
 }
 
 int main(int argc, char** argv) {

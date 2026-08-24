@@ -721,8 +721,38 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
   // case) -- see planning/bridge-direct-routing-path-gap.md -- and covered
   // by test/test_smart_bridge_ack_misroute and test/test_dual_bridge_ack_mirror.
   if (packet->isRouteDirect()) {
-    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: DIRECT-route packet (path_hops=%d), NOT redirecting -- has its own path to follow\n",
-                         (int)packet->getPathHashCount());
+    // Narrow, safe exception: a *freshly composed* zero-hop reply (path
+    // never decremented from a longer one -- path_len is 0 from the moment
+    // this packet was created) whose payload type can only ever reach here
+    // as a brand-new local reply, never as Mesh::routeDirectRecvAcks()'s
+    // decremented relay-in-transit shape (PAYLOAD_TYPE_ACK, and the
+    // MULTIPART wrapper it can arrive wrapped in) -- that's the ONE shape
+    // that must keep falling through unconditionally, since a 0-hop ack
+    // mid-relay means "local delivery, physically adjacent", the opposite
+    // of "this reply's destination is the bridge we just heard from", and
+    // is indistinguishable from a fresh reply by inspecting the outgoing
+    // packet alone (see test_smart_bridge_ack_misroute /
+    // test_dual_bridge_ack_mirror -- both assert ACK must fall through).
+    // For every other DIRECT payload type, path_len==0 unambiguously means
+    // "reply straight back to whoever I just heard this request from" --
+    // exactly the node recv_pkt_source_bridge names -- so skip the local
+    // RF broadcast nobody bridge-only-reachable can receive anyway. Fixes
+    // the observed live symptom: admin/CLI (PAYLOAD_TYPE_RESPONSE) and
+    // discover (PAYLOAD_TYPE_CONTROL) replies to a bridge-only client (no
+    // LoRa radio at all) needlessly keyed the local radio on every request.
+    // See planning/ip-bridge-mesh-safety.md gap #4.
+    if (packet->getPathHashCount() == 0 &&
+        packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
+        packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
+      BRIDGE_DEBUG_PRINTLN("trySendViaBridge: zero-hop DIRECT reply (type=%d), redirecting bridge-only -- no relay ambiguity for this payload type\n",
+                           (int)packet->getPayloadType());
+      ((AbstractBridge *)bridge)->sendPacket(packet);
+      releasePacket(packet);
+      return true;
+    }
+
+    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: DIRECT-route packet (path_hops=%d, type=%d), NOT redirecting -- has its own path to follow\n",
+                         (int)packet->getPathHashCount(), (int)packet->getPayloadType());
     return false;
   }
 
