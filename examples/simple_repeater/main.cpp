@@ -13,8 +13,8 @@
   #include <helpers/nrf52/EthernetCLI.h>
 #endif
 
-// WiFi STA uplink (internet-bridge groundwork -- see planning/ip-bridge-design.md).
-// Plain internet connectivity only, not the companion TCP protocol -- this board still
+// WiFi STA uplink (IP-bridge groundwork -- see planning/ip-bridge-design.md).
+// Plain IP connectivity only, not the companion TCP protocol -- this board still
 // talks CLI over Serial/ESPNowBridgeRadio (or the normal LoRa radio) same as any other
 // repeater. Credentials are runtime-configurable only (CommonCLI 'set wifi.ssid'/
 // 'set wifi.pwd'), never build flags. Needed by ESPNOW_BRIDGE_RADIO boards (WiFi STA and
