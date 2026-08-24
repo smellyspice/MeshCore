@@ -71,6 +71,54 @@ struct NeighbourInfo {
   int8_t snr; // multiplied by 4, user should divide to get float value
 };
 
+#ifndef MAX_BRIDGE_NEIGHBOURS
+  #define MAX_BRIDGE_NEIGHBOURS   8
+#endif
+
+// Kept as a separate table from NeighbourInfo/neighbours[] (not merged in)
+// because neighbours[] represents identities heard directly over this
+// repeater's own radio and is consumed as-is by the RF-awareness check in
+// getRetransmitDelay() -- that check must stay uncontaminated by bridge
+// traffic. The two tables are merged only at display time, in
+// formatNeighborsReply(), with a 'via' column added to every row.
+struct BridgeNeighbourInfo {
+  mesh::Identity id;
+  uint32_t heard_timestamp;
+  int8_t snr;   // meaningful for ESPNOW (real RF), not for IP -- 'via' tells the reader which
+  uint8_t via;  // BRIDGE_VIA_* below
+};
+
+#define BRIDGE_VIA_UNKNOWN  0
+#define BRIDGE_VIA_RS232    1
+#define BRIDGE_VIA_ESPNOW   2
+#define BRIDGE_VIA_IP       3
+
+#ifdef WITH_IP_BRIDGE
+// A PATH-return crossing the IP bridge is the packet that decides which
+// route (RF or IP) a contact ends up using -- see
+// planning/ip-bridge-mesh-safety.md. Holding it back briefly, only when
+// this repeater currently has a live RF neighbour to defer to, gives a
+// genuine RF path a head start; if one exists and completes in time, the
+// held IP copy arrives as a harmless duplicate (existing dedup absorbs it)
+// instead of racing ahead of it. Only ever delays PAYLOAD_TYPE_PATH
+// packets -- see logTx().
+
+// "Live" RF neighbour = heard directly within this window. Generous on
+// purpose -- advert cadence isn't tightly bounded, and erring toward
+// "still consider it live" only costs a bit of held-back latency, never
+// correctness (see planning doc).
+#define RF_AWARENESS_WINDOW_SECS   (30 * 60)
+
+// PATH-return traffic is low-volume by nature (one per contact per
+// re-established route, not per message) -- a handful of slots is ample.
+#define MAX_PENDING_IP_SENDS   4
+
+struct PendingIpSend {
+  mesh::Packet* packet;        // NULL = empty slot
+  unsigned long release_at;    // millis() timestamp; send once passed
+};
+#endif
+
 #ifndef FIRMWARE_BUILD_DATE
   #define FIRMWARE_BUILD_DATE   "14 Aug 2026"
 #endif
@@ -115,6 +163,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #if MAX_NEIGHBOURS
   NeighbourInfo neighbours[MAX_NEIGHBOURS];
 #endif
+#ifdef WITH_BRIDGE
+  BridgeNeighbourInfo bridge_neighbours[MAX_BRIDGE_NEIGHBOURS];
+#endif
+#ifdef WITH_IP_BRIDGE
+  PendingIpSend pending_ip_sends[MAX_PENDING_IP_SENDS];
+#endif
   CayenneLPP telemetry;
   unsigned long set_radio_at, revert_radio_at;
   float pending_freq;
@@ -139,6 +193,15 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #endif
 
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
+#ifdef WITH_BRIDGE
+  void putBridgeNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr, const void* src_bridge);
+  void formatAllNeighborsReply(char* reply);
+#endif
+#ifdef WITH_IP_BRIDGE
+  bool hasLiveRfNeighbour() const;
+  void queueDelayedIpSend(mesh::Packet* pkt);
+  void flushPendingIpSends();
+#endif
   uint8_t handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood);
   uint8_t handleAnonRegionsReq(const mesh::Identity& sender, uint32_t sender_timestamp, const uint8_t* data);
   uint8_t handleAnonOwnerReq(const mesh::Identity& sender, uint32_t sender_timestamp, const uint8_t* data);

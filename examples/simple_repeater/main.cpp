@@ -23,8 +23,18 @@
 // uplink with no ESP-NOW side-channel involved at all.
 #if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
+  #include <time.h>
+  #include "NtpConfig.h"
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
+  // These boards have no battery-backed RTC (see AutoDiscoverRTCClock's
+  // fallback), so rtc_clock resets to a bogus default every boot until
+  // something sets it -- previously only GPS or a manual/companion-app
+  // 'clock sync'. WiFi is already a hard requirement here, so a public NTP
+  // pool is a free way to get a correct clock with no extra dependency.
+  // Applied once: not continuous drift correction, just fixing the
+  // stuck-at-boot-default case.
+  bool ntp_synced = false;
 #endif
 
 StdRNG fast_rng;
@@ -148,6 +158,7 @@ void setup() {
         } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
             MESH_DEBUG_PRINTLN("WiFi connected successfully!");
             wifi_needs_reconnect = false;
+            configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);   // UTC, matches rtc_clock's epoch semantics
         }
     });
 
@@ -261,6 +272,15 @@ void loop() {
     WiFi.disconnect();
     WiFi.reconnect();
     last_wifi_reconnect_attempt = millis();
+    ntp_synced = false;   // re-apply once the reconnect's SNTP query lands
+  }
+  if (!ntp_synced) {
+    time_t now = time(NULL);
+    if (now > 1700000000) {   // plausible real UTC time, ie. SNTP has actually landed
+      rtc_clock.setCurrentTime((uint32_t)now);
+      ntp_synced = true;
+      MESH_DEBUG_PRINTLN("Clock synced via NTP: %u", (uint32_t)now);
+    }
   }
 #endif
 
