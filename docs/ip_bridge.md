@@ -1,7 +1,7 @@
 # IP Bridge
 
 The IP bridge lets a repeater relay mesh traffic to one other MeshCore node over a
-plain IP network (WiFi/LAN/internet), instead of only RF. It's part of the
+plain IP network (WiFi/LAN, or a routed link between two sites), instead of only RF. It's part of the
 Trifecta branch: a single repeater can run real LoRa, an ESP-NOW bridge, and the
 IP bridge all at once — each one independently enabled.
 
