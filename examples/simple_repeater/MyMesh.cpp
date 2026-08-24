@@ -87,6 +87,96 @@ void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float sn
 #endif
 }
 
+#ifdef WITH_BRIDGE
+void MyMesh::putBridgeNeighbour(const mesh::Identity &id, uint32_t timestamp, float snr, const void* src_bridge) {
+  uint8_t via = BRIDGE_VIA_UNKNOWN;
+#ifdef WITH_RS232_BRIDGE
+  if (src_bridge == &rs232_bridge) via = BRIDGE_VIA_RS232;
+#endif
+#ifdef WITH_ESPNOW_BRIDGE
+  if (src_bridge == &espnow_bridge) via = BRIDGE_VIA_ESPNOW;
+#endif
+#ifdef WITH_IP_BRIDGE
+  if (src_bridge == &ip_bridge) via = BRIDGE_VIA_IP;
+#endif
+
+  // find existing entry, else use least recently updated
+  uint32_t oldest_timestamp = 0xFFFFFFFF;
+  BridgeNeighbourInfo *entry = &bridge_neighbours[0];
+  for (int i = 0; i < MAX_BRIDGE_NEIGHBOURS; i++) {
+    if (id.matches(bridge_neighbours[i].id)) {
+      entry = &bridge_neighbours[i];
+      break;
+    }
+    if (bridge_neighbours[i].heard_timestamp < oldest_timestamp) {
+      entry = &bridge_neighbours[i];
+      oldest_timestamp = entry->heard_timestamp;
+    }
+  }
+
+  entry->id = id;
+  entry->heard_timestamp = getRTCClock()->getCurrentTime();
+  entry->snr = (int8_t)(snr * 4);
+  entry->via = via;
+}
+#endif
+
+#ifdef WITH_IP_BRIDGE
+bool MyMesh::hasLiveRfNeighbour() const {
+#if MAX_NEIGHBOURS
+  uint32_t now = getRTCClock()->getCurrentTime();
+  for (int i = 0; i < MAX_NEIGHBOURS; i++) {
+    if (neighbours[i].heard_timestamp > 0 && now - neighbours[i].heard_timestamp < RF_AWARENESS_WINDOW_SECS) {
+      return true;
+    }
+  }
+#endif
+  return false;
+}
+
+void MyMesh::queueDelayedIpSend(mesh::Packet* pkt) {
+  for (int i = 0; i < MAX_PENDING_IP_SENDS; i++) {
+    if (pending_ip_sends[i].packet == NULL) {
+      mesh::Packet* clone = obtainNewPacket();
+      if (clone == NULL) break;   // pool exhausted -- fall through to immediate send below
+
+      *clone = *pkt;
+      clone->_src_bridge = NULL;   // in-memory only, not meaningful for a queued clone
+
+      // Same formula shape as companion_radio's calcDirectTimeoutMillisFor(),
+      // using this packet's own visible outer hop count as a stand-in for
+      // the sender's (invisible, encrypted) taught-path length -- see
+      // planning/ip-bridge-mesh-safety.md. Target half that estimate, not
+      // the full value, for comfortable margin under the sender's own
+      // send-timeout.
+      uint32_t airtime = _radio->getEstAirtimeFor(pkt->getPathByteLen() + pkt->payload_len + 2);
+      uint32_t hops = pkt->getPathHashCount();
+      uint32_t estimate = 500 + (airtime * 6 + 250) * (hops + 1);
+
+      pending_ip_sends[i].packet = clone;
+      pending_ip_sends[i].release_at = millis() + estimate / 2;
+      BRIDGE_DEBUG_PRINTLN("queueDelayedIpSend: holding PATH packet for %ums (slot %d)\n", (unsigned)(estimate / 2), i);
+      return;
+    }
+  }
+  // no free slot -- don't drop it, just send immediately as a fallback
+  BRIDGE_DEBUG_PRINTLN("queueDelayedIpSend: queue full, sending immediately\n");
+  ip_bridge.sendPacket(pkt);
+}
+
+void MyMesh::flushPendingIpSends() {
+  unsigned long now = millis();
+  for (int i = 0; i < MAX_PENDING_IP_SENDS; i++) {
+    if (pending_ip_sends[i].packet != NULL && (long)(now - pending_ip_sends[i].release_at) >= 0) {
+      BRIDGE_DEBUG_PRINTLN("flushPendingIpSends: releasing held PATH packet (slot %d)\n", i);
+      ip_bridge.sendPacket(pending_ip_sends[i].packet);
+      releasePacket(pending_ip_sends[i].packet);
+      pending_ip_sends[i].packet = NULL;
+    }
+  }
+}
+#endif
+
 uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secret, uint32_t sender_timestamp, const uint8_t* data, bool is_flood) {
   ClientInfo* client = NULL;
   if (data[0] == 0) {   // blank password, just check if sender is in ACL
@@ -520,7 +610,16 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
     espnow_bridge.sendPacket(pkt);
 #endif
 #ifdef WITH_IP_BRIDGE
-    ip_bridge.sendPacket(pkt);
+    // Only a PATH-return (the packet that actually decides which route a
+    // contact ends up using) gets held back, and only when there's a live
+    // RF neighbour to defer to -- see planning/ip-bridge-mesh-safety.md.
+    // Everything else (adverts, ordinary chat traffic) crosses immediately,
+    // same as before.
+    if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH && hasLiveRfNeighbour()) {
+      queueDelayedIpSend(pkt);
+    } else {
+      ip_bridge.sendPacket(pkt);
+    }
 #endif
   }
 #endif
@@ -718,11 +817,22 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
                           const uint8_t *app_data, size_t app_data_len) {
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
 
-  // if this a zero hop advert (and not via 'Share'), add it to neighbours
+  // if this a zero hop advert (and not via 'Share'), add it to neighbours.
+  // Adverts relayed in over a bridge also carry zero path hops (bridges
+  // don't touch path_len), so they must be split off into their own table
+  // -- see BridgeNeighbourInfo -- rather than being recorded as if this
+  // repeater heard them directly over its own radio.
   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
     AdvertDataParser parser(app_data, app_data_len);
     if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
-      putNeighbour(id, timestamp, packet->getSNR());
+#ifdef WITH_BRIDGE
+      if (packet->_src_bridge != NULL) {
+        putBridgeNeighbour(id, timestamp, packet->getSNR(), packet->_src_bridge);
+      } else
+#endif
+      {
+        putNeighbour(id, timestamp, packet->getSNR());
+      }
     }
   }
 }
@@ -905,7 +1015,14 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
     if (id.matches(self_id)) {
       return;
     }
-    putNeighbour(id, rtc_clock.getCurrentTime(), packet->getSNR());
+#ifdef WITH_BRIDGE
+    if (packet->_src_bridge != NULL) {
+      putBridgeNeighbour(id, rtc_clock.getCurrentTime(), packet->getSNR(), packet->_src_bridge);
+    } else
+#endif
+    {
+      putNeighbour(id, rtc_clock.getCurrentTime(), packet->getSNR());
+    }
   }
 }
 
@@ -955,6 +1072,12 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 
 #if MAX_NEIGHBOURS
   memset(neighbours, 0, sizeof(neighbours));
+#endif
+#ifdef WITH_BRIDGE
+  memset(bridge_neighbours, 0, sizeof(bridge_neighbours));
+#endif
+#ifdef WITH_IP_BRIDGE
+  memset(pending_ip_sends, 0, sizeof(pending_ip_sends));
 #endif
 
   // defaults
@@ -1225,6 +1348,82 @@ void MyMesh::formatNeighborsReply(char *reply) {
   *dp = 0; // null terminator
 }
 
+#ifdef WITH_BRIDGE
+// Separate command, separate reply buffer -- deliberately does not touch
+// formatNeighborsReply()/'neighbors' above, since that's a long-established
+// 3-field (hex:secs_ago:snr) plain-text format other tooling may already
+// parse. This one merges neighbours[] (RF) and bridge_neighbours[] into a
+// single newest-to-oldest list with a 'via' column on every row instead.
+void MyMesh::formatAllNeighborsReply(char *reply) {
+  char *dp = reply;
+  bool first = true;
+
+#if MAX_NEIGHBOURS
+  int16_t neighbours_count = 0;
+  NeighbourInfo* sorted_neighbours[MAX_NEIGHBOURS];
+  for (int i = 0; i < MAX_NEIGHBOURS; i++) {
+    auto neighbour = &neighbours[i];
+    if (neighbour->heard_timestamp > 0) {
+      sorted_neighbours[neighbours_count++] = neighbour;
+    }
+  }
+  std::sort(sorted_neighbours, sorted_neighbours + neighbours_count, [](const NeighbourInfo* a, const NeighbourInfo* b) {
+    return a->heard_timestamp > b->heard_timestamp; // desc
+  });
+#else
+  int16_t neighbours_count = 0;
+#endif
+
+  int16_t bridge_count = 0;
+  BridgeNeighbourInfo* sorted_bridge[MAX_BRIDGE_NEIGHBOURS];
+  for (int i = 0; i < MAX_BRIDGE_NEIGHBOURS; i++) {
+    auto entry = &bridge_neighbours[i];
+    if (entry->heard_timestamp > 0) {
+      sorted_bridge[bridge_count++] = entry;
+    }
+  }
+  std::sort(sorted_bridge, sorted_bridge + bridge_count, [](const BridgeNeighbourInfo* a, const BridgeNeighbourInfo* b) {
+    return a->heard_timestamp > b->heard_timestamp; // desc
+  });
+
+  static const char* via_names[] = { "?", "RS232", "ESPNOW", "IP" };
+  char hex[10];
+  int ni = 0, bi = 0;
+  while ((ni < neighbours_count || bi < bridge_count) && dp - reply < 134) {
+#if MAX_NEIGHBOURS
+    bool take_rf = ni < neighbours_count &&
+        (bi >= bridge_count || sorted_neighbours[ni]->heard_timestamp >= sorted_bridge[bi]->heard_timestamp);
+#else
+    bool take_rf = false;
+#endif
+    if (!first) *dp++ = '\n';
+    first = false;
+
+#if MAX_NEIGHBOURS
+    if (take_rf) {
+      NeighbourInfo *neighbour = sorted_neighbours[ni++];
+      mesh::Utils::toHex(hex, neighbour->id.pub_key, 4);
+      uint32_t secs_ago = getRTCClock()->getCurrentTime() - neighbour->heard_timestamp;
+      sprintf(dp, "%s:%d:%d:RF", hex, secs_ago, neighbour->snr);
+    } else
+#endif
+    {
+      BridgeNeighbourInfo *entry = sorted_bridge[bi++];
+      mesh::Utils::toHex(hex, entry->id.pub_key, 4);
+      uint32_t secs_ago = getRTCClock()->getCurrentTime() - entry->heard_timestamp;
+      sprintf(dp, "%s:%d:%d:%s", hex, secs_ago, entry->snr, via_names[entry->via]);
+    }
+    while (*dp) dp++;
+  }
+
+  if (dp == reply) {
+    strcpy(dp, "-none-");
+    dp += 6;
+  }
+  *dp = 0;
+}
+#endif
+
 void MyMesh::removeNeighbor(const uint8_t *pubkey, int key_len) {
 #if MAX_NEIGHBOURS
   for (int i = 0; i < MAX_NEIGHBOURS; i++) {
@@ -1364,6 +1563,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       Serial.printf("\n");
     }
     reply[0] = 0;
+#ifdef WITH_BRIDGE
+  } else if (memcmp(command, "neighbors.all", 13) == 0) {
+    formatAllNeighborsReply(reply);
+#endif
   } else if (memcmp(command, "discover.neighbors", 18) == 0) {
     const char* sub = command + 18;
     while (*sub == ' ') sub++;
@@ -1387,6 +1590,7 @@ void MyMesh::loop() {
 #endif
 #ifdef WITH_IP_BRIDGE
   ip_bridge.loop();
+  flushPendingIpSends();
 #endif
 
   mesh::Mesh::loop();
