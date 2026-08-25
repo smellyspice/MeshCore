@@ -824,6 +824,47 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
   releasePacket(packet);   // normally freed after local TX completes -- this path bypasses that entirely
   return true;
 }
+
+// Relay-forwarding counterpart to trySendViaBridge() -- see its declaration
+// in MyMesh.h and planning/ip-bridge-mesh-safety.md gap #4's "relay-
+// forwarding" follow-up. Covers ordinary pass-through traffic
+// (REQ/RESPONSE/TXT_MSG/PATH relayed onward, not addressed to this node),
+// which never reaches trySendViaBridge() at all -- Mesh::onRecvPacket()
+// returns ACTION_RETRANSMIT* for it directly, without ever calling
+// sendPacket(). Confirmed live 2026-08-25: this traffic keeps keying local
+// RF even when the next hop is a repeater only reachable over a bridge
+// (different frequencies, no RF overlap at all) -- the dominant real-world
+// traffic pattern this session's earlier reply-only fix didn't touch.
+//
+// Deliberately does NOT reuse trySendViaBridge()'s exception 1 (the
+// recv_pkt_source_bridge/"arrived via bridge X, so reply via bridge X"
+// heuristic) -- that's only valid for a packet THIS repeater originates in
+// direct reply to something it just received. A relayed packet isn't
+// addressed to this repeater at all; its destination has no necessary
+// relationship to how the packet in hand arrived. Reusing that heuristic
+// here would reintroduce exactly the class of bug 32e54bca/8f47488b fixed
+// (blindly assuming "same bridge it came from" for a packet still carrying
+// real hops to follow). Only the identity-based lookup
+// (findBridgeOnlyNextHop(), backed by the neighbour tables, checking the
+// packet's own real next hop) is safe here, and only once this repeater's
+// own hash has already been stripped from path[] with real hops still
+// remaining -- a hop count of 0 at this point means there's no meaningful
+// next-hop identity left in path[] to look up (the packet is a single
+// local-delivery hop away from the true endpoint, whose identity was never
+// in path[] to begin with), so that case always falls through unchanged.
+bool MyMesh::tryRelayViaBridge(mesh::Packet* packet) {
+  if (packet->isRouteDirect() && packet->getPathHashCount() > 0) {
+    void* target_bridge = findBridgeOnlyNextHop(packet->path, packet->getPathHashSize());
+    if (target_bridge != NULL) {
+      BRIDGE_DEBUG_PRINTLN("tryRelayViaBridge: DIRECT-route relay (path_hops=%d, type=%d), next hop is a known bridge-only neighbour, redirecting\n",
+                           (int)packet->getPathHashCount(), (int)packet->getPayloadType());
+      ((AbstractBridge *)target_bridge)->sendPacket(packet);
+      releasePacket(packet);
+      return true;
+    }
+  }
+  return false;
+}
 #endif
 
 void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const mesh::Identity &sender,

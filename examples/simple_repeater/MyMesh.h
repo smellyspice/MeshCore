@@ -285,6 +285,11 @@ protected:
   mesh::DispatcherAction onRecvPacket(mesh::Packet* pkt) override;
 #ifdef WITH_BRIDGE
   bool trySendViaBridge(mesh::Packet* packet) override;
+  // Relay-forwarding counterpart to trySendViaBridge() -- covers ordinary
+  // pass-through traffic (REQ/RESPONSE/TXT_MSG/PATH being relayed, not
+  // addressed to this node), which never goes through sendPacket() at all.
+  // See planning/ip-bridge-mesh-safety.md gap #4, "relay-forwarding" follow-up.
+  bool tryRelayViaBridge(mesh::Packet* packet) override;
 #endif
 
   void onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret, const mesh::Identity& sender, uint8_t* data, size_t len) override;
