@@ -253,8 +253,40 @@ protected:
     return true;
   }
 
+  // Mirrors MyMesh::tryRelayViaBridge() (MyMesh.cpp) -- relay-forwarding
+  // counterpart to trySendViaBridge() above, called from
+  // Dispatcher::processRecvPacket() for ACTION_RETRANSMIT* actions
+  // (packets not addressed to this node, being passed along).
+  bool tryRelayViaBridge(Packet* packet) override {
+    if (packet->isRouteDirect() && packet->getPathHashCount() > 0) {
+      void* target_bridge = findBridgeOnlyNextHop(packet->path, packet->getPathHashSize());
+      if (target_bridge != nullptr) {
+        ((AbstractBridge*)target_bridge)->sendPacket(packet);
+        releasePacket(packet);
+        return true;
+      }
+    }
+    return false;
+  }
+
 public:
   DispatcherAction recv(Packet* pkt) { return onRecvPacket(pkt); }
+
+  // Direct access to the hook in isolation, for testing its own gating
+  // logic (e.g. FLOOD packets must never be considered) without needing to
+  // fabricate a fully wire-valid FLOOD packet that survives Mesh's own
+  // parsing just to reach it via the full pipeline.
+  bool tryRelay(Packet* pkt) { return tryRelayViaBridge(pkt); }
+
+  // Drives the REAL Dispatcher::processRecvPacket() (now protected,
+  // visibility-only change) -- unlike recv() above (which calls
+  // onRecvPacket() directly), this exercises the actual ACTION_RETRANSMIT*
+  // handling in Dispatcher.cpp, including the new tryRelayViaBridge() hook.
+  // Needs a heap-allocated packet (RealQueuePacketManager::free() does
+  // `delete p`) -- both the "redirected" path (tryRelayViaBridge releases
+  // it directly) and the "queued" path (freed later via the outbound
+  // queue) assume that.
+  void relayRecv(Packet* pkt) { processRecvPacket(pkt); }
 
   // Drives the real Dispatcher send-completion cycle: one loop() to pick up
   // and "start" the queued send, one more for FakeRadio's always-true
@@ -309,6 +341,27 @@ Packet* makeDirectPacketWithOneHop(uint8_t payload_type, uint8_t next_hop_hash) 
   p->path[0] = next_hop_hash;
   p->setPathHashSizeAndCount(1, 1);
   uint8_t body[4] = {9, 9, 9, 9};
+  memcpy(p->payload, body, sizeof(body));
+  p->payload_len = sizeof(body);
+  return p;
+}
+
+// A DIRECT packet being genuinely relayed through this repeater (not
+// addressed to it) -- path is [self_hash, next_hop_hash], matching how a
+// real REQ/RESPONSE/TXT_MSG/PATH arrives when this repeater is a mid-path
+// hop. Heap-allocated (unlike makeDirectAckWithOneMoreHop, which is only
+// ever fed to onRecvPacket() directly, bypassing the packet manager) --
+// relayRecv() drives the REAL Dispatcher::processRecvPacket(), which frees
+// the packet one way or another (either tryRelayViaBridge() releasing it
+// directly, or the outbound queue owning and eventually freeing it), and
+// RealQueuePacketManager::free() does `delete p`.
+Packet* makeDirectRelayPacket(uint8_t payload_type, uint8_t self_hash, uint8_t next_hop_hash) {
+  Packet* p = new Packet();
+  p->header = ROUTE_TYPE_DIRECT | (payload_type << PH_TYPE_SHIFT);
+  p->path[0] = self_hash;
+  p->path[1] = next_hop_hash;
+  p->setPathHashSizeAndCount(1, 2);
+  uint8_t body[4] = {1, 1, 1, 1};
   memcpy(p->payload, body, sizeof(body));
   p->payload_len = sizeof(body);
   return p;
@@ -588,6 +641,78 @@ TEST(DualBridgeAckMirror, DirectAckToKnownBridgeOnlyNextHopRedirects) {
       << "identity-based lookup is safe for ACK too -- the redirect decision "
          "never depends on distinguishing fresh-reply from relay-in-transit";
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+}
+
+// The relay-forwarding fix (planning/ip-bridge-mesh-safety.md gap #4,
+// "relay-forwarding" follow-up): a DIRECT packet genuinely being relayed
+// through this repeater (addressed elsewhere, e.g. a REQ/RESPONSE/TXT_MSG
+// mid-path) must redirect bridge-only when its real next hop is a known
+// bridge-only neighbour -- confirmed live 2026-08-25 this was the dominant
+// remaining source of needless RF TX, since it never reached
+// trySendViaBridge() at all (a completely different code path,
+// ACTION_RETRANSMIT* via processRecvPacket(), not sendPacket()). Drives the
+// REAL Dispatcher::processRecvPacket(), not just the hook in isolation.
+TEST(DualBridgeAckMirror, DirectRelayPacketToKnownBridgeOnlyNextHopRedirects) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);
+
+  repeater.relayRecv(makeDirectRelayPacket(PAYLOAD_TYPE_REQ, 0x73, 0x99));
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "next hop is a known bridge-only neighbour -- must redirect there directly";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+  EXPECT_EQ(repeater.mgr.pending, nullptr)
+      << "a redirected relay packet must NOT also be queued for local TX";
+}
+
+// Regression guard: unknown next hop must fall through to the existing,
+// already-tested behavior -- queued for local TX (and, once actually sent,
+// mirrored to every bridge via logTx(), same as before this fix existed).
+TEST(DualBridgeAckMirror, DirectRelayPacketToUnknownNextHopFallsThroughToQueue) {
+  TestTrifectaMesh repeater(0x73);
+  // no neighbour tables populated -- next hop identity is unknown
+
+  repeater.relayRecv(makeDirectRelayPacket(PAYLOAD_TYPE_REQ, 0x73, 0x99));
+
+  ASSERT_NE(repeater.mgr.pending, nullptr)
+      << "unknown next hop must fall through to the normal local-TX queue";
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "once actually sent locally, logTx() still mirrors to every bridge as before";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1);
+}
+
+// Safety guard: an RF-heard next hop must never be redirected, even during
+// relay-forwarding -- same principle as the reply-path fix, re-verified for
+// this separate code path since it has its own independent gate.
+TEST(DualBridgeAckMirror, DirectRelayPacketToRfHeardNextHopFallsThroughToQueue) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putRfNeighbourHash(0x99);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);
+
+  repeater.relayRecv(makeDirectRelayPacket(PAYLOAD_TYPE_REQ, 0x73, 0x99));
+
+  ASSERT_NE(repeater.mgr.pending, nullptr)
+      << "an RF-heard next hop must never be skipped in favor of a bridge redirect";
+}
+
+// Safety guard: FLOOD-route relaying (broadcast to whoever's listening, not
+// a single known next hop) must never be redirected, even if the neighbour
+// tables happen to have a matching entry for some unrelated reason --
+// tryRelayViaBridge() gates on isRouteDirect() specifically because FLOOD
+// has no single "next hop" concept to look up.
+TEST(DualBridgeAckMirror, FloodPacketNeverRedirectsViaRelayHook) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);
+
+  Packet flood;
+  flood.header = ROUTE_TYPE_FLOOD | (PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT);
+  flood.path[0] = 0x99;
+  flood.setPathHashSizeAndCount(1, 1);
+
+  EXPECT_FALSE(repeater.tryRelay(&flood))
+      << "FLOOD-route packets must never be redirected by the relay hook";
 }
 
 int main(int argc, char** argv) {

@@ -129,10 +129,14 @@ class Dispatcher {
   unsigned long last_budget_update;
   unsigned long duty_cycle_window_ms;
 
-  void processRecvPacket(Packet* pkt);
   void updateTxBudget();
 
 protected:
+  // Visibility only (was private) -- lets native tests drive the real
+  // receive-dispatch path (needed to exercise tryRelayViaBridge()) instead
+  // of calling onRecvPacket() directly and bypassing it. No logic change.
+  void processRecvPacket(Packet* pkt);
+
   PacketManager* _mgr;
   Radio* _radio;
   MillisecondClock* _ms;
@@ -169,6 +173,20 @@ protected:
   // -- sendPacket() will skip queuing it locally in that case. Default:
   // never intercepts, so behavior is unchanged unless a subclass overrides.
   virtual bool trySendViaBridge(Packet* packet) { return false; }
+
+  // Same shape as trySendViaBridge(), but for the OTHER path a packet can
+  // take to local radio transmission: relay-forwarding (onRecvPacket()
+  // returning ACTION_RETRANSMIT* for a packet not addressed to this node,
+  // e.g. a REQ/RESPONSE/TXT_MSG/PATH being passed along). That path never
+  // goes through sendPacket(), so trySendViaBridge() never sees it -- this
+  // hook is called from processRecvPacket() right before the packet would
+  // be queued for local transmission. Return true to indicate the packet
+  // has been fully handled some other way; processRecvPacket() will skip
+  // queuing it locally in that case. Default: never intercepts, so behavior
+  // is unchanged unless a subclass overrides -- same contract as
+  // trySendViaBridge().
+  virtual bool tryRelayViaBridge(Packet* packet) { return false; }
+
   virtual const char* getLogDateTime() { return ""; }
 
   virtual float getAirtimeBudgetFactor() const;

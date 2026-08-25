@@ -264,7 +264,7 @@ void Dispatcher::processRecvPacket(Packet* pkt) {
     _mgr->free(pkt);
   } else if (action == ACTION_MANUAL_HOLD) {
     // sub-class is wanting to manually hold Packet instance, and call releasePacket() at appropriate time
-  } else {   // ACTION_RETRANSMIT*
+  } else if (!tryRelayViaBridge(pkt)) {   // ACTION_RETRANSMIT*, not handled some other way
     uint8_t priority = (action >> 24) - 1;
     uint32_t _delay = action & 0xFFFFFF;
 
