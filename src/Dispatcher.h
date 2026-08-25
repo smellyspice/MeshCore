@@ -166,25 +166,16 @@ protected:
   virtual void logTx(Packet* packet, int len) { }
   virtual void logTxFail(Packet* packet, int len) { }
 
-  // Called from sendPacket(), after the packet is fully finalized (route
-  // type/transport codes/path all set by the caller) but before it would be
-  // queued for local radio transmission. Return true to indicate the packet
-  // has been fully handled some other way (e.g. sent directly out a bridge)
-  // -- sendPacket() will skip queuing it locally in that case. Default:
-  // never intercepts, so behavior is unchanged unless a subclass overrides.
+  // Called from sendPacket() after the packet is fully finalized but before
+  // it's queued for local radio transmission. Return true if the packet has
+  // been fully handled some other way (e.g. sent directly out a bridge);
+  // sendPacket() then skips queuing it locally. Default never intercepts.
   virtual bool trySendViaBridge(Packet* packet) { return false; }
 
-  // Same shape as trySendViaBridge(), but for the OTHER path a packet can
-  // take to local radio transmission: relay-forwarding (onRecvPacket()
-  // returning ACTION_RETRANSMIT* for a packet not addressed to this node,
-  // e.g. a REQ/RESPONSE/TXT_MSG/PATH being passed along). That path never
-  // goes through sendPacket(), so trySendViaBridge() never sees it -- this
-  // hook is called from processRecvPacket() right before the packet would
-  // be queued for local transmission. Return true to indicate the packet
-  // has been fully handled some other way; processRecvPacket() will skip
-  // queuing it locally in that case. Default: never intercepts, so behavior
-  // is unchanged unless a subclass overrides -- same contract as
-  // trySendViaBridge().
+  // Same contract as trySendViaBridge(), but for relay-forwarding
+  // (onRecvPacket() returning ACTION_RETRANSMIT* for a packet not addressed
+  // to this node), which never goes through sendPacket(). Called from
+  // processRecvPacket() right before local queuing.
   virtual bool tryRelayViaBridge(Packet* packet) { return false; }
 
   virtual const char* getLogDateTime() { return ""; }

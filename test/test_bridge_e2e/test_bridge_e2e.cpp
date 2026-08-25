@@ -1,17 +1,16 @@
 // Full software-only, end-to-end reproduction of the trifecta hardware
-// topology described in planning/bridge-direct-routing-path-gap.md:
+// topology:
 //
 //   CompanionA -- RepeaterA <==bridge==> RepeaterB -- CompanionB
 //
-// Every node runs the REAL production classes (mesh::Mesh, mesh::Dispatcher,
+// Every node runs the real production classes (mesh::Mesh, mesh::Dispatcher,
 // BaseChatMesh, mesh::StaticPoolPacketManager), driven through real
-// Dispatcher::loop() cycles -- not a reimplementation of routing logic. The
-// only things stood in for are: the physical radio (a simple broadcast
-// medium standing in for LoRa), the bridge transport (an in-process
-// equivalent of BridgeBase's RX/TX guard -- see TestBridge below), and the
-// AES/SHA256 mock backends (upgraded from pure no-ops to real, reversible
-// XOR-based substitutes so encrypted payloads actually round-trip -- see
-// test/mocks/AES.h and SHA256.h).
+// Dispatcher::loop() cycles -- not a reimplementation of routing logic.
+// Stood in for: the physical radio (a broadcast medium standing in for
+// LoRa), the bridge transport (an in-process equivalent of BridgeBase's
+// RX/TX guard -- see TestBridge below), and the AES/SHA256 mock backends
+// (real reversible XOR-based substitutes, not no-ops, so encrypted payloads
+// round-trip -- see test/mocks/AES.h and SHA256.h).
 //
 // Goal: settle, with reproducible software evidence, whether the confirmed
 // bugs (bridge path-crossing under logRx, out_path asymmetry, shared RX/TX

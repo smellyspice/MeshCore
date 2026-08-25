@@ -55,7 +55,7 @@ public:
   uint8_t bridge_channel = 0; // 1-14 (ESP-NOW only)
   char bridge_secret[16]; // for XOR encryption of bridge packets (ESP-NOW only)
 #if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
-  // WiFi STA settings (internet-bridge groundwork, see planning/ip-bridge-design.md)
+  // WiFi STA settings, used by ESPNOW_BRIDGE_RADIO and/or WITH_IP_BRIDGE
   char wifi_ssid[33];
   char wifi_pwd[64];
 #endif

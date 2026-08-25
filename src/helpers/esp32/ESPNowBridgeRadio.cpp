@@ -18,29 +18,15 @@ static esp_err_t last_send_result;
 static uint8_t rx_buf[256];
 static uint8_t last_rx_len = 0;
 
-// --- Reliability: unicast-with-one-retry instead of fire-and-forget broadcast ---
+// Broadcast ESP-NOW frames get no MAC-layer ACK/retry; unicast gets hardware
+// ACK + retry for free. This radio only ever talks to one paired repeater,
+// so once a valid frame's been heard from it, sends switch from broadcast to
+// unicast straight to its MAC. Falls back to broadcast until a peer's known.
 //
-// Broadcast ESP-NOW frames get NO MAC-layer ACK/retry (normal 802.11
-// behaviour, not an ESP-NOW quirk) -- every broadcast is exactly one shot on
-// air. Unicast frames get real hardware ACK + automatic retry from the WiFi
-// radio/firmware itself, for free, before the send callback even fires. This
-// radio only ever talks to one paired repeater (unlike the repeater side,
-// which can have several companions), so there's just one peer to learn --
-// once we've heard a valid frame from it, switch from broadcast to unicast
-// straight to its MAC. Falls back to broadcast until a peer's been heard
-// (bootstrap case).
-//
-// Unlike ESPNowBridge.cpp's fuller multi-peer/multi-attempt retry queue, this
-// radio's sends are tracked by Dispatcher's own outbound_expiry (~150ms, see
-// getEstAirtimeFor() below) -- Dispatcher gives up on the whole packet if
-// isSendComplete() doesn't go true in time, regardless of what we're doing
-// internally. Live diagnostics (2026-08-17) showed real OnDataSent() failure
-// callbacks landing fast (8-43ms), not stalling anywhere near the 150ms
-// budget, and a message can genuinely fail twice in a row -- so a few more
-// attempts fit comfortably within budget (4 attempts * worst-observed ~43ms +
-// 3 * 10ms retry gaps ~= 200ms average case is well under 150ms in practice,
-// since most attempts land closer to 20ms) without risking a longer sequence
-// still running after Dispatcher's already moved on.
+// Retries are bounded by Dispatcher's own outbound_expiry (~150ms) -- it
+// gives up on the whole packet if isSendComplete() doesn't go true in time.
+// 4 attempts fits comfortably within that budget based on observed
+// OnDataSent() failure timing.
 static uint8_t s_peer_mac[6] = {0};
 static bool s_peer_known = false;
 
@@ -144,20 +130,11 @@ static void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   ESPNOW_DEBUG_PRINTLN("Recv: len = %d", (int)payloadLen);
 }
 
-// This board's onboard WS2812 evidently expects RGB wire order, not the GRB
-// neopixelWrite() assumes for a standard WS2812 -- confirmed empirically
-// (asking for green displayed as red). Net effect: passing the desired green
-// level into the "red" argument slot (and vice versa) compensates; blue is
-// unaffected either way since it's in the same wire position regardless.
-// Only matters for genuine colors -- white (equal R=G=B) is unaffected, which
-// is why the existing TX indicator (ESP32Board.h, unmodified) already looked
-// correct despite not accounting for this.
+// This board's onboard WS2812 expects RGB wire order, not the GRB
+// neopixelWrite() assumes -- confirmed empirically (green displayed as red).
+// R/G are swapped to compensate; blue is in the same wire position either way.
 #define BOARD_LED_GREEN(pin, brightness) neopixelWrite(pin, brightness, 0, 0)
 #define BOARD_LED_RED(pin, brightness)   neopixelWrite(pin, 0, brightness, 0)
-// Blue is unaffected by the R/G swap above -- same wire position either way.
-// Reserved for the IpBridge "running as server" indicator (Phase 2,
-// see planning/ip-bridge-design.md) -- not wired up yet, no server
-// concept exists until IpBridge itself is built.
 #define BOARD_LED_BLUE(pin, brightness)  neopixelWrite(pin, 0, 0, brightness)
 #define BOARD_LED_OFF(pin)               neopixelWrite(pin, 0, 0, 0)
 

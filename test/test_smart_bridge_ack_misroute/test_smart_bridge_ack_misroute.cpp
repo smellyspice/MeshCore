@@ -1,32 +1,23 @@
-// Investigating a live hardware symptom (direct-routed ACKs never reach the
-// sender across the bridge, deterministically, even with a verified-correct
-// 2-hop path -- R6/third-party-repeater theory already ruled out by a live
-// hardware retest with that hop removed) with a clean, minimal path.
+// examples/simple_repeater/MyMesh.cpp's "smart bridge reply routing"
+// (recv_pkt_source_bridge / trySendViaBridge()) stamps
+// recv_pkt_source_bridge = pkt->_src_bridge at the top of every
+// onRecvPacket() call and consumes it on the next sendPacket() call,
+// redirecting that packet back out the same bridge instead of queuing it
+// for local radio transmission.
 //
-// Hypothesis: examples/simple_repeater/MyMesh.cpp's "smart bridge reply
-// routing" (recv_pkt_source_bridge / trySendViaBridge(), for issue #3251)
-// stamps recv_pkt_source_bridge = pkt->_src_bridge at the top of EVERY
-// onRecvPacket() call, bridge-sourced or not, and consumes it on the very
-// next sendPacket() call, redirecting that packet back out the same bridge
-// instead of queuing it for local radio transmission.
+// For a direct ACK arriving at a repeater that is itself the last hop
+// before the destination companion, PAYLOAD_TYPE_ACK's special-case
+// handling calls routeDirectRecvAcks(), which composes a new packet (fully-
+// consumed path) and sends it via sendPacket(). If this repeater's own
+// receipt of the incoming ack was bridge-sourced, the "next sendPacket()
+// call" heuristic can't distinguish "this new packet is my own final local
+// delivery" from "this is a genuine bridge-sourced-request reply" -- it
+// bounces it back out the bridge instead of broadcasting locally to reach
+// the actual destination, with no second chance.
 //
-// For a direct ACK arriving at a repeater THAT ITSELF IS THE LAST HOP
-// before the destination companion, PAYLOAD_TYPE_ACK's special-case handling
-// in Mesh::onRecvPacket doesn't retransmit the original packet directly --
-// it calls routeDirectRecvAcks(), which composes a NEW packet (with the
-// now-fully-consumed path) and sends it via sendPacket(). If this repeater's
-// own receipt of the incoming ack was bridge-sourced (exactly the case when
-// the far side of a bridge is this ack's second-to-last hop), the "next
-// sendPacket() call" heuristic doesn't distinguish "this new packet is my
-// own final local delivery" from "this is a genuine bridge-sourced-request
-// reply" -- it just intercepts it and bounces it right back out the bridge
-// it came from, instead of broadcasting it locally to reach the actual
-// destination. The packet never gets a second chance: trySendViaBridge()
-// unconditionally releases it after redirecting.
-//
-// This test reproduces MyMesh's exact wrapper logic (not the full MyMesh
-// class, which needs CommonCLI/IdentityStore and isn't natively
-// compilable) against the REAL Mesh::onRecvPacket/routeDirectRecvAcks.
+// Reproduces MyMesh's exact wrapper logic (not the full MyMesh class, which
+// needs CommonCLI/IdentityStore and isn't natively compilable) against the
+// real Mesh::onRecvPacket/routeDirectRecvAcks.
 #include <gtest/gtest.h>
 #include <Mesh.h>
 #include <cstring>
@@ -156,7 +147,7 @@ Packet makeDirectAck(uint8_t self_hash) {
 // bridge) at the second-to-last repeater. Its forwarded copy should queue
 // for local transmission normally.
 TEST(SmartBridgeAckMisroute, AckArrivingLocallyForwardsNormally) {
-  TestRepeaterMesh repeater(0x73);   // "R73"
+  TestRepeaterMesh repeater(0x73);
   FakeBridgeHandle bridge;
 
   Packet ack = makeDirectAck(0x73);
@@ -169,19 +160,19 @@ TEST(SmartBridgeAckMisroute, AckArrivingLocallyForwardsNormally) {
   EXPECT_EQ(bridge.send_calls, 0);
 }
 
-// The actual bug: R73 receives M5's ack via the bridge (this is the LAST
-// repeater hop before the destination companion). routeDirectRecvAcks()
+// The actual bug: a repeater is the last hop before the destination
+// companion and receives the ack via the bridge. routeDirectRecvAcks()
 // composes a fresh, fully-path-consumed packet and sends it -- but because
-// R73's OWN receipt of the incoming ack was bridge-sourced,
+// this repeater's own receipt of the incoming ack was bridge-sourced,
 // trySendViaBridge() intercepts this brand new, unrelated packet and bounces
 // it back out the bridge instead of broadcasting it locally to the
 // destination companion. The ack never reaches its actual destination.
 TEST(SmartBridgeAckMisroute, AckArrivingViaBridgeGetsMisroutedBackOutTheBridge) {
-  TestRepeaterMesh repeater(0x73);   // "R73", last hop before the companion
+  TestRepeaterMesh repeater(0x73);   // last hop before the companion
   FakeBridgeHandle bridge;
 
   Packet ack = makeDirectAck(0x73);
-  ack._src_bridge = &bridge;   // arrived via the bridge (from V3's side)
+  ack._src_bridge = &bridge;   // arrived via the bridge
 
   repeater.recv(&ack);
 

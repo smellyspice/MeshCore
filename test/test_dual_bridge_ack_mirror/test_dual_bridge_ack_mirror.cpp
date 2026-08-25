@@ -1,42 +1,21 @@
-// Investigating a live hardware symptom reported on a topology the original
-// trySendViaBridge fix (see test_smart_bridge_ack_misroute) was never tested
-// against: a single repeater (Xiao/R73) running BOTH an ESPNowBridge (to a
-// companion with no LoRa radio at all) AND an IpBridge (to a remote site,
-// V3/Ra2) at once -- the "trifecta" env.
+// Covers a repeater running both an ESPNowBridge and an IpBridge at once
+// (the "trifecta" env) -- a topology test_smart_bridge_ack_misroute's
+// single-bridge fix doesn't exercise.
 //
-// Reported symptom: companion -> M5 message delivers fine; the ACK back
-// (M5 -> V3 -[IP bridge]-> R73 -[ESPNOW bridge]-> companion) never arrives
-// on the first two send attempts, only on the 3rd flood-escalated one --
-// same "silent, deterministic" signature as the original bug.
+// trySendViaBridge()'s "redirect back out the originating bridge" behavior
+// is only correct for FLOOD-route replies with no path of their own (e.g.
+// sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies). A
+// DIRECT-route packet always carries a real path[] to follow -- bouncing it
+// back the way it came is only coincidentally correct when it happens to
+// have 0 hops left (single-bridge, last-hop case). Gate on
+// packet->isRouteDirect(), not path hash count.
 //
-// First theory tested here (see git history) was that the "0 path hops
-// left" carve-out from the original fix didn't cover R73's case, since its
-// last hop (the companion) is ESPNOW-only, not real LoRa. That test PASSED
-// against the current code, proving the 0-hop case was already fine here --
-// so the theory was wrong and the investigation moved to live hardware with
-// BRIDGE_DEBUG on. The real capture showed the actual failure:
-// `trySendViaBridge: redirecting type=3 back out originating bridge,
-// path_hops=1` -- a DIRECT-route ack with ONE hop still remaining (not
-// zero) was bounced straight back out the IP bridge it arrived from,
-// instead of continuing on (via normal local TX + logTx()'s mirror hook)
-// toward the ESPNOW bridge its path[] actually pointed to.
-//
-// Root cause: trySendViaBridge()'s "redirect back out the originating
-// bridge" behavior was never actually about hop count -- it's only correct
-// for FLOOD-route replies with no path of their own (e.g.
-// sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies, both
-// validated on real hardware per planning/smart-bridge-routing-design.md
-// §11). A DIRECT-route packet always carries a real path[] to follow --
-// bouncing it back the way it came is only coincidentally correct when that
-// packet happens to have 0 hops left (single-bridge, last-hop case). The
-// fix: gate on packet->isRouteDirect(), not path hash count.
-//
-// This test drives the REAL Mesh::onRecvPacket/routeDirectRecvAcks and REAL
+// Drives the real Mesh::onRecvPacket/routeDirectRecvAcks and real
 // Dispatcher::loop()/checkSend() send-completion cycle (not just the
 // trySendViaBridge hook in isolation, unlike test_smart_bridge_ack_misroute)
-// against a repeater carrying MyMesh's CURRENT trySendViaBridge (route-type
-// gated) and CURRENT logTx() (bridge_pkt_src==0 mirror-on-TX, unconditionally
-// fanning out to every compiled-in bridge).
+// against a repeater carrying MyMesh's current trySendViaBridge (route-type
+// gated) and current logTx() (bridge_pkt_src==0 mirror-on-TX, fanning out to
+// every compiled-in bridge).
 #include <gtest/gtest.h>
 #include <Mesh.h>
 #include <helpers/AbstractBridge.h>
@@ -148,7 +127,7 @@ class TestTrifectaMesh : public FakeMeshDeps, public Mesh {
 public:
   void* recv_pkt_source_bridge = nullptr;
   unsigned long recv_pkt_source_bridge_set_at = 0;
-  int bridge_pkt_src = 0;   // 0 = logTx (mirror-on-TX), matches R73's confirmed live 'bridge.source=logTx'
+  int bridge_pkt_src = 0;   // 0 = logTx (mirror-on-TX), confirmed live default
   FakeBridge espnow_bridge;
   FakeBridge ip_bridge;
 
@@ -221,8 +200,7 @@ protected:
     recv_pkt_source_bridge = nullptr;
 
     if (packet->isRouteDirect()) {
-      // Exception 1: freshly-composed zero-hop reply, non-ACK/MULTIPART --
-      // see planning/ip-bridge-mesh-safety.md gap #4.
+      // Exception 1: freshly-composed zero-hop reply, non-ACK/MULTIPART.
       if (bridge != nullptr && packet->getPathHashCount() == 0 &&
           packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
           packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
@@ -382,8 +360,7 @@ Packet* makeZeroHopDirectResponse() {
 
 // A FLOOD-route reply with no path of its own -- the shape of
 // sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies, the two
-// scenarios trySendViaBridge's bridge-redirect behavior was actually
-// designed and validated for (planning/smart-bridge-routing-design.md §11).
+// scenarios trySendViaBridge's bridge-redirect behavior was designed for.
 // Heap-allocated (unlike makeDirectAck/makeDirectAckWithOneMoreHop above,
 // which the caller feeds to onRecvPacket() by address and never frees) --
 // trySendViaBridge's redirect path calls releasePacket(), which for this
@@ -404,10 +381,9 @@ Packet* makeFloodReply() {
 // Control case: with only the IpBridge active (bridge_pkt_src doesn't matter
 // since ip_bridge is the only one exercised), a 0-hop-left ack arriving via
 // the IP bridge falls through to a real local TX -- and logTx() mirrors it
-// back out over IP too, which is harmless (V3 will dedup it) and matches
-// the topology the original fix was actually validated against.
+// back out over IP too, which is harmless (the peer will dedup it).
 TEST(DualBridgeAckMirror, SingleBridgeZeroHopFallsThroughToLocalTxAndMirrors) {
-  TestTrifectaMesh repeater(0x33);   // stand-in for V3/Ra2
+  TestTrifectaMesh repeater(0x33);
 
   Packet ack = makeDirectAck(0x33);
   ack._src_bridge = &repeater.ip_bridge;
@@ -420,19 +396,15 @@ TEST(DualBridgeAckMirror, SingleBridgeZeroHopFallsThroughToLocalTxAndMirrors) {
       << "logTx() should mirror the completed local TX back out the IP bridge";
 }
 
-// The scenario under investigation: R73, a trifecta node, receives M5's ack
-// via the IP bridge (from V3) with 0 hops left -- meaning R73 itself must
-// deliver it to the companion, which is ONLY reachable via the ESPNOW
-// bridge (no real LoRa radio on that end at all). If this fails, the
-// current code has a genuine hole for this topology; if it passes, the
-// MyMesh-level routing logic is provably correct and the real root cause
-// lies elsewhere (ESPNowBridge's own internals, peer state, hardware).
+// A dual-bridge trifecta node receives an ack via the IP bridge with 0 hops
+// left -- meaning it must deliver locally to a companion reachable only via
+// the ESPNOW bridge (no real LoRa radio on that end at all).
 TEST(DualBridgeAckMirror, ZeroHopAckFromIpBridgeStillReachesEspNowBridge) {
-  TestTrifectaMesh repeater(0x73);   // R73/Xiao, dual-bridge trifecta node
-  repeater.bridge_pkt_src = 0;       // confirmed live via CLI: R73's bridge.source=logTx
+  TestTrifectaMesh repeater(0x73);
+  repeater.bridge_pkt_src = 0;
 
   Packet ack = makeDirectAck(0x73);
-  ack._src_bridge = &repeater.ip_bridge;   // arrived from V3's side, via the IP bridge
+  ack._src_bridge = &repeater.ip_bridge;
 
   repeater.begin();
   repeater.recv(&ack);
@@ -443,13 +415,12 @@ TEST(DualBridgeAckMirror, ZeroHopAckFromIpBridgeStillReachesEspNowBridge) {
          "to have any chance of receiving it -- it has no other path to it";
 }
 
-// The actual live hardware failure (BRIDGE_DEBUG capture, 2026-08-22): a
-// DIRECT ack arrives via the IP bridge still carrying ONE more hop (the
-// companion's ESPNOW leg) after this repeater's own hash is stripped --
-// exactly the "path_hops=1" seen in the real log. Before the route-type fix,
-// this got bounced straight back out the IP bridge instead of continuing on.
+// A DIRECT ack arrives via the IP bridge still carrying one more hop (the
+// companion's ESPNOW leg) after this repeater's own hash is stripped.
+// Before the route-type fix, this got bounced straight back out the IP
+// bridge instead of continuing on.
 TEST(DualBridgeAckMirror, DirectAckWithRemainingHopFallsThroughAndReachesEspNowBridge) {
-  TestTrifectaMesh repeater(0x73);   // R73/Xiao
+  TestTrifectaMesh repeater(0x73);
   repeater.bridge_pkt_src = 0;
 
   Packet ack = makeDirectAckWithOneMoreHop(0x73, 0x99);   // 0x99 stands in for the companion's leg
@@ -466,7 +437,7 @@ TEST(DualBridgeAckMirror, DirectAckWithRemainingHopFallsThroughAndReachesEspNowB
          "packet's path[] actually points";
   EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
       << "logTx() mirrors to every configured bridge, including IP -- "
-         "harmless, V3 will dedup it";
+         "harmless, the peer will dedup it";
 }
 
 // Regression guard: the two reply mechanisms trySendViaBridge's
@@ -487,16 +458,13 @@ TEST(DualBridgeAckMirror, FloodReplyStillRedirectsBackOutOriginatingBridge) {
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
 }
 
-// Staleness fix (planning/ip-bridge-mesh-safety.md gap #4, found live
-// 2026-08-24): recv_pkt_source_bridge is "consume-once" but was previously
-// unbounded in age -- if nothing gets sent for a while after a
-// bridge-sourced receive (bridge heartbeat pongs don't go through
-// Mesh::sendPacket() at all, so this is plausible), a stale flag could
-// misfire on some later, completely unrelated send. Reproduces the actual
-// observed failure: a broadcast FLOOD send with NO relation to any prior
-// receive must reach both bridges (today's safe default), not get
-// incorrectly redirected bridge-only just because a receive happened long
-// ago and was never "consumed" by an intervening send.
+// recv_pkt_source_bridge is "consume-once" but was previously unbounded in
+// age -- if nothing gets sent for a while after a bridge-sourced receive
+// (bridge heartbeat pongs don't go through Mesh::sendPacket() at all), a
+// stale flag could misfire on a later, unrelated send. A broadcast FLOOD
+// send unrelated to any prior receive must reach both bridges, not get
+// redirected bridge-only just because a receive happened long ago and was
+// never consumed by an intervening send.
 TEST(DualBridgeAckMirror, StaleRecvPktSourceBridgeDoesNotMisrouteUnrelatedSend) {
   TestTrifectaMesh repeater(0x73);
   repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
@@ -530,12 +498,11 @@ TEST(DualBridgeAckMirror, FreshRecvPktSourceBridgeStillRedirects) {
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
 }
 
-// The fix under test (planning/ip-bridge-mesh-safety.md gap #4): a
-// zero-hop DIRECT admin/CLI reply, generated in response to a request that
+// A zero-hop DIRECT admin/CLI reply, generated in response to a request that
 // arrived via the bridge, must go bridge-only -- the observed live symptom
-// was Ra2's LoRa radio keying on every admin/CLI request from a companion
-// reachable ONLY through the ESPNOW+IP bridge chain (no radio on that end
-// at all), a pure waste of airtime nobody could ever receive.
+// was a repeater's LoRa radio keying on every admin/CLI request from a
+// companion reachable only through an ESPNOW+IP bridge chain (no radio on
+// that end at all), a pure waste of airtime nobody could ever receive.
 TEST(DualBridgeAckMirror, ZeroHopDirectResponseFromBridgeRedirectsBridgeOnly) {
   TestTrifectaMesh repeater(0x73);
   repeater.recv_pkt_source_bridge = &repeater.ip_bridge;   // as if just processed a bridge-sourced admin request
@@ -573,13 +540,10 @@ TEST(DualBridgeAckMirror, ZeroHopDirectAckFromBridgeStillFallsThrough) {
          "only real local TX (+ logTx's separate mirror) is safe for it";
 }
 
-// The actual live symptom this fix targets: R73/Ra2-style topology, a
-// CLI-over-chat reply (TXT_MSG) with ONE real hop remaining whose next hop
-// (the intermediate repeater) has only ever been heard over the IP bridge,
-// never over local RF -- observed live via BRIDGE_DEBUG capture 2026-08-24
-// (`trySendViaBridge: DIRECT-route packet (path_hops=1, type=2), NOT
-// redirecting`, followed by a real LoRa TX every time). Must now redirect
-// bridge-only instead of needlessly keying local RF.
+// The actual live symptom this fix targets: a CLI-over-chat reply (TXT_MSG)
+// with one real hop remaining whose next hop (the intermediate repeater)
+// has only ever been heard over the IP bridge, never over local RF. Must
+// redirect bridge-only instead of needlessly keying local RF.
 TEST(DualBridgeAckMirror, DirectTxtMsgToKnownBridgeOnlyNextHopRedirects) {
   TestTrifectaMesh repeater(0x73);
   repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);   // 0x99 heard only via IP bridge, never RF
@@ -643,15 +607,13 @@ TEST(DualBridgeAckMirror, DirectAckToKnownBridgeOnlyNextHopRedirects) {
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
 }
 
-// The relay-forwarding fix (planning/ip-bridge-mesh-safety.md gap #4,
-// "relay-forwarding" follow-up): a DIRECT packet genuinely being relayed
-// through this repeater (addressed elsewhere, e.g. a REQ/RESPONSE/TXT_MSG
-// mid-path) must redirect bridge-only when its real next hop is a known
-// bridge-only neighbour -- confirmed live 2026-08-25 this was the dominant
-// remaining source of needless RF TX, since it never reached
-// trySendViaBridge() at all (a completely different code path,
-// ACTION_RETRANSMIT* via processRecvPacket(), not sendPacket()). Drives the
-// REAL Dispatcher::processRecvPacket(), not just the hook in isolation.
+// The relay-forwarding fix: a DIRECT packet genuinely being relayed through
+// this repeater (addressed elsewhere, e.g. a REQ/RESPONSE/TXT_MSG mid-path)
+// must redirect bridge-only when its real next hop is a known bridge-only
+// neighbour. This never reaches trySendViaBridge() at all -- a different
+// code path, ACTION_RETRANSMIT* via processRecvPacket(), not sendPacket().
+// Drives the real Dispatcher::processRecvPacket(), not just the hook in
+// isolation.
 TEST(DualBridgeAckMirror, DirectRelayPacketToKnownBridgeOnlyNextHopRedirects) {
   TestTrifectaMesh repeater(0x73);
   repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);

@@ -13,27 +13,18 @@
   #include <helpers/nrf52/EthernetCLI.h>
 #endif
 
-// WiFi STA uplink (IP-bridge groundwork -- see planning/ip-bridge-design.md).
-// Plain IP connectivity only, not the companion TCP protocol -- this board still
-// talks CLI over Serial/ESPNowBridgeRadio (or the normal LoRa radio) same as any other
-// repeater. Credentials are runtime-configurable only (CommonCLI 'set wifi.ssid'/
-// 'set wifi.pwd'), never build flags. Needed by ESPNOW_BRIDGE_RADIO boards (WiFi STA and
-// ESP-NOW share one radio, so the channel-sync logic below matters) and, independently,
-// by any board -- ESP-NOW-radio or real-LoRa -- that just wants WITH_IP_BRIDGE's WiFi
-// uplink with no ESP-NOW side-channel involved at all.
+// WiFi STA uplink for ESPNOW_BRIDGE_RADIO (shares one radio with ESP-NOW, so
+// channel-sync matters) and/or WITH_IP_BRIDGE. Credentials are runtime-only
+// (CommonCLI 'set wifi.ssid'/'set wifi.pwd'), never build flags.
 #if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
   #include <time.h>
   #include "NtpConfig.h"
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
-  // These boards have no battery-backed RTC (see AutoDiscoverRTCClock's
-  // fallback), so rtc_clock resets to a bogus default every boot until
-  // something sets it -- previously only GPS or a manual/companion-app
-  // 'clock sync'. WiFi is already a hard requirement here, so a public NTP
-  // pool is a free way to get a correct clock with no extra dependency.
-  // Applied once: not continuous drift correction, just fixing the
-  // stuck-at-boot-default case.
+  // These boards have no battery-backed RTC, so rtc_clock resets to a bogus
+  // default every boot until something sets it. Applied once at boot/
+  // reconnect, not continuous drift correction.
   bool ntp_synced = false;
 #endif
 
@@ -165,17 +156,12 @@ void setup() {
     WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
 #ifdef ESPNOW_BRIDGE_RADIO
     // WiFi STA and ESP-NOW share one radio and MUST be on the same channel.
-    // Deliberately NOT auto-synced to whatever WiFi negotiates: that would
-    // let the live channel silently diverge from the 'bridge.channel' CLI
-    // setting (a config value that lies), and wouldn't propagate to any
-    // paired ESP-NOW mini boards either, since each configures its own
-    // channel independently. Instead, the access point's channel must be
-    // static and known at config time, with 'bridge.channel' set to match
-    // it by hand -- see planning/ip-bridge-design.md for the operational
-    // requirement this implies. relockChannel() here only recovers from the
-    // transient PHY reset BLE causes at association time -- it re-asserts
-    // whatever channel 'bridge.channel' already configured (applied earlier
-    // in MyMesh::begin()), it does not read anything back from WiFi.
+    // The access point's channel must be static and known at config time,
+    // with 'bridge.channel' set to match it by hand -- not auto-synced from
+    // WiFi, which wouldn't propagate to paired ESP-NOW mini boards anyway.
+    // relockChannel() only recovers from BLE's transient PHY reset at
+    // association time; it re-asserts the already-configured channel, it
+    // doesn't read anything back from WiFi.
     radio_driver.relockChannel();
 #endif
   }

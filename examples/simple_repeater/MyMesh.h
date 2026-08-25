@@ -71,12 +71,9 @@ struct NeighbourInfo {
   #define MAX_BRIDGE_NEIGHBOURS   8
 #endif
 
-// Kept as a separate table from NeighbourInfo/neighbours[] (not merged in)
-// because neighbours[] represents identities heard directly over this
-// repeater's own radio and is consumed as-is by the RF-awareness check in
-// getRetransmitDelay() -- that check must stay uncontaminated by bridge
-// traffic. The two tables are merged only at display time, in
-// formatNeighborsReply(), with a 'via' column added to every row.
+// Kept separate from neighbours[] so the RF-awareness check in
+// getRetransmitDelay() isn't contaminated by bridge-heard identities. Merged
+// only at display time (formatAllNeighborsReply()), with a 'via' column.
 struct BridgeNeighbourInfo {
   mesh::Identity id;
   uint32_t heard_timestamp;
@@ -89,39 +86,31 @@ struct BridgeNeighbourInfo {
 #define BRIDGE_VIA_ESPNOW   2
 #define BRIDGE_VIA_IP       3
 
-// How long a bridge_neighbours[] entry stays trusted enough for
-// findBridgeOnlyNextHop() to redirect on it -- same generous-on-purpose
-// reasoning as RF_AWARENESS_WINDOW_SECS below (a stale-but-still-used entry
-// only costs an unnecessary bridge send attempt; a too-eager entry could
-// misroute). Defined unconditionally (not just under WITH_IP_BRIDGE) since
-// findBridgeOnlyNextHop() applies to any bridge type.
+// How long a bridge_neighbours[] entry stays trusted for
+// findBridgeOnlyNextHop() to redirect on. Generous on purpose: a stale entry
+// just costs one unnecessary bridge send, but a too-eager one could misroute.
 #define BRIDGE_NEIGHBOUR_FRESHNESS_SECS   (30 * 60)
 
-// Max age for recv_pkt_source_bridge to still be trusted by trySendViaBridge()
-// -- generous for genuine same-turn reply processing (which is synchronous,
-// same millis() tick in practice) but far too short for it to still be "the
-// same request" after other unrelated activity. See recv_pkt_source_bridge's
-// declaration above.
+// Max age for recv_pkt_source_bridge to still be trusted by trySendViaBridge().
+// Same-turn reply generation is synchronous, so this should always be near-
+// instant in practice; the bound exists to stop a stale flag from applying to
+// an unrelated later send.
 #define RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS   1000
 
 #ifdef WITH_IP_BRIDGE
-// A PATH-return crossing the IP bridge is the packet that decides which
-// route (RF or IP) a contact ends up using -- see
-// planning/ip-bridge-mesh-safety.md. Holding it back briefly, only when
-// this repeater currently has a live RF neighbour to defer to, gives a
-// genuine RF path a head start; if one exists and completes in time, the
-// held IP copy arrives as a harmless duplicate (existing dedup absorbs it)
-// instead of racing ahead of it. Only ever delays PAYLOAD_TYPE_PATH
-// packets -- see logTx().
+// A PATH-return crossing the IP bridge is what decides whether a contact
+// ends up using RF or IP. When a live RF neighbour exists, logTx() holds the
+// packet briefly instead of mirroring it immediately, giving a genuine RF
+// path a head start -- if it completes in time, the held IP copy just
+// arrives as a harmless duplicate (existing dedup absorbs it) instead of
+// racing ahead of it. Only PAYLOAD_TYPE_PATH packets are delayed.
 
-// "Live" RF neighbour = heard directly within this window. Generous on
-// purpose -- advert cadence isn't tightly bounded, and erring toward
-// "still consider it live" only costs a bit of held-back latency, never
-// correctness (see planning doc).
+// "Live" = heard directly within this window. Generous on purpose: erring
+// toward "still live" only costs some held-back latency, never correctness.
 #define RF_AWARENESS_WINDOW_SECS   (30 * 60)
 
-// PATH-return traffic is low-volume by nature (one per contact per
-// re-established route, not per message) -- a handful of slots is ample.
+// One PATH-return per re-established route, not per message -- low volume,
+// so a handful of slots is ample.
 #define MAX_PENDING_IP_SENDS   4
 
 struct PendingIpSend {
@@ -159,21 +148,16 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   RegionEntry* load_stack[8];
   RegionEntry* recv_pkt_region;
   // Which bridge (if any) delivered the packet currently being processed --
-  // copied from Packet::_src_bridge at the same point recv_pkt_region is
-  // set, read back in sendFloodReply() to route the reply directly back out
-  // that same bridge instead of requiring a local radio broadcast first.
-  // void* (not AbstractBridge*) to avoid a new #include here; cast back to
-  // AbstractBridge* at the point it's actually used.
+  // copied from Packet::_src_bridge, read back in trySendViaBridge() to
+  // route a reply directly back out that same bridge. void* rather than
+  // AbstractBridge* to avoid a new #include; cast at point of use.
   void* recv_pkt_source_bridge;
-  // millis() timestamp recv_pkt_source_bridge was last set -- "consume-once"
-  // only guarantees it's cleared by the NEXT sendPacket() call, not that one
-  // happens soon. If nothing gets sent for a while after a bridge-sourced
-  // receive (plausible -- bridge heartbeat pongs don't go through
-  // Mesh::sendPacket() at all), the stale flag can misfire on some later,
-  // completely unrelated locally-initiated send. trySendViaBridge() checks
-  // this age and ignores the flag once it's too old. See
-  // planning/ip-bridge-mesh-safety.md gap #4 (staleness bug found live
-  // 2026-08-24 via discover.neighbors's own probe getting misrouted).
+  // millis() timestamp recv_pkt_source_bridge was last set. "Consume-once"
+  // only guarantees it clears on the next sendPacket() call, not that one
+  // happens soon (bridge heartbeat pongs don't go through sendPacket() at
+  // all) -- trySendViaBridge() ignores the flag once it's older than
+  // RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS, so a stale flag can't misroute an
+  // unrelated later send.
   unsigned long recv_pkt_source_bridge_set_at;
   TransportKey default_scope;
   RateLimiter discover_limiter, anon_limiter;
@@ -197,12 +181,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint8_t pending_sf;
   uint8_t pending_cr;
   int  matching_peer_indexes[MAX_CLIENTS];
-  // Each bridge type is independently gated (not an #elif chain) so a board
-  // can have more than one active at once -- e.g. WITH_ESPNOW_BRIDGE +
-  // WITH_IP_BRIDGE together on a real-LoRa repeater. Any code that needs to
-  // act on "all active bridges" must touch each member explicitly; there's
-  // no shared base-class array/loop here deliberately, to keep each bridge
-  // trivially optional at compile time with zero cost when not selected.
+  // Independently gated (not an #elif chain) so more than one can be active
+  // at once, e.g. ESP-NOW + IP together on a real-LoRa repeater.
 #ifdef WITH_RS232_BRIDGE
   RS232Bridge rs232_bridge;
 #endif
@@ -217,14 +197,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #ifdef WITH_BRIDGE
   void putBridgeNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr, const void* src_bridge);
   void formatAllNeighborsReply(char* reply);
-  // Looks up a DIRECT packet's next hop (path[0], truncated identity hash)
-  // against the neighbour tables: returns the specific bridge instance if
-  // that identity has ONLY ever been heard via one bridge and NEVER over
-  // local RF (within RF_AWARENESS_WINDOW_SECS-ish confidence -- see .cpp),
-  // else NULL (unknown or RF-reachable -- always the safe default). Used by
-  // trySendViaBridge() to redirect DIRECT-route sends whose true next hop
-  // is provably bridge-only, without guessing from how the *triggering*
-  // packet happened to arrive (see planning/ip-bridge-mesh-safety.md gap #4).
+  // Looks up a DIRECT packet's next hop (path[0]) against the neighbour
+  // tables. Returns the specific bridge if that identity has only ever been
+  // heard via one bridge and never over local RF; otherwise NULL, the safe
+  // default. Used to redirect sends whose next hop is provably bridge-only.
   void* findBridgeOnlyNextHop(const uint8_t* hash, uint8_t hash_size) const;
 #endif
 #ifdef WITH_IP_BRIDGE
@@ -282,9 +258,8 @@ protected:
 #ifdef WITH_BRIDGE
   bool trySendViaBridge(mesh::Packet* packet) override;
   // Relay-forwarding counterpart to trySendViaBridge() -- covers ordinary
-  // pass-through traffic (REQ/RESPONSE/TXT_MSG/PATH being relayed, not
-  // addressed to this node), which never goes through sendPacket() at all.
-  // See planning/ip-bridge-mesh-safety.md gap #4, "relay-forwarding" follow-up.
+  // pass-through traffic (a packet not addressed to this node), which never
+  // goes through sendPacket() at all.
   bool tryRelayViaBridge(mesh::Packet* packet) override;
 #endif
 
@@ -351,10 +326,8 @@ public:
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
-    // Each active bridge is checked/toggled independently -- with more than
-    // one compiled in, they can each already be in a different running
-    // state, so there's no single isRunning() to gate on up front the way a
-    // lone bridge could.
+    // Toggled independently per bridge -- with more than one compiled in,
+    // each can already be in a different running state.
 #ifdef WITH_RS232_BRIDGE
     if (enable != rs232_bridge.isRunning()) {
       if (enable) rs232_bridge.begin(); else rs232_bridge.end();
@@ -373,15 +346,10 @@ public:
   }
 
   void restartBridge() override {
-    // Always end()+begin(), not just when already running -- begin()
-    // re-validates config and is a safe no-op if still incomplete, but if we
-    // only reset an already-running bridge, a board configured entirely via
-    // CLI (ip.host/ip.port/ip.secret set one at a time, each triggering this
-    // callback) would never actually start until a reboot, since isRunning()
-    // stays false until begin() has already succeeded once. Applies to every
-    // active bridge independently -- CommonCLI's 'set ip.*'/'set bridge.*'
-    // handlers all funnel through this same callback regardless of which
-    // bridge's setting actually changed.
+    // Always end()+begin(), not just when already running: begin() is a safe
+    // no-op on incomplete config, but a board configured one CLI field at a
+    // time would otherwise never start until a reboot (isRunning() stays
+    // false until begin() has already succeeded once).
 #ifdef WITH_RS232_BRIDGE
     rs232_bridge.end();
     rs232_bridge.begin();
@@ -395,17 +363,10 @@ public:
     ip_bridge.begin();
 #endif
 #ifdef ESPNOW_BRIDGE_RADIO
-    // bridge.channel/bridge.secret (FR11) are the ESPNowBridgeRadio's own
-    // channel/secret, unrelated to the `bridge` (IpBridge/etc) member above
-    // despite the similar naming -- both happen to route through this same
-    // callback since CommonCLI's 'set bridge.channel'/'set bridge.secret'
-    // handlers call restartBridge() either way. Applying this here (rather
-    // than only at boot in begin()) is what makes the channel/secret
-    // actually CLI-settable instead of compile-time only. Gated the same way
-    // begin() gates its own initial call -- setting only one of the two via
-    // CLI must leave the radio inert, not armed with an empty secret (which
-    // would divide-by-zero in ESPNowBridgeRadio's xorCrypt() on the next
-    // received frame).
+    // bridge.channel/bridge.secret here are ESPNowBridgeRadio's own, separate
+    // from the IpBridge/etc member above despite the similar naming. Applying
+    // them here (not just at boot) is what makes them CLI-settable. Requires
+    // both set -- an empty secret would divide-by-zero in xorCrypt().
     if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
       radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
     }

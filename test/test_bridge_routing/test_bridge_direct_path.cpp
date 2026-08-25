@@ -1,10 +1,10 @@
-// Reproduces (against the REAL production Mesh::onRecvPacket/removeSelfFromPath,
-// not a reimplementation) the bridge direct-path-crossing bug described in
-// planning/bridge-direct-routing-path-gap.md: a DIRECT-routed packet's path[]
-// is only in a state the far side of a bridge can consume if the local hop's
-// hash has already been stripped before the bridge mirrors it out. Whether
-// that's true is currently an accident of `bridge_pkt_src` timing (logRx vs
-// logTx in examples/simple_repeater/MyMesh.cpp), not anything coordinated.
+// Reproduces (against the real production Mesh::onRecvPacket/
+// removeSelfFromPath, not a reimplementation) a bridge direct-path-crossing
+// bug: a DIRECT-routed packet's path[] is only in a state the far side of a
+// bridge can consume if the local hop's hash has already been stripped
+// before the bridge mirrors it out. Whether that's true is currently an
+// accident of `bridge_pkt_src` timing (logRx vs logTx in
+// examples/simple_repeater/MyMesh.cpp), not anything coordinated.
 //
 // No hardware, no radio, no serial port: two in-process Mesh instances stand
 // in for RepeaterA/RepeaterB, and a bridge crossing is simulated by handing

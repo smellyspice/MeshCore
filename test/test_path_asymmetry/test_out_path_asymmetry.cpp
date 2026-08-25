@@ -1,13 +1,12 @@
-// Tests "theory 4" from planning/bridge-direct-routing-path-gap.md: when a
-// companion (B) receives someone's (A's) message as a FLOOD packet, B's own
-// reply (an ACK, carrying a reciprocal path so A can reach B directly next
-// time) is itself flooded back -- but nothing in that exchange gives B a
-// direct path back to A. B's out_path to A stays unknown until B
-// independently receives an explicit PATH packet from A. This is a plain
-// protocol property of BaseChatMesh, with no bridge involved at all.
+// When a companion (B) receives someone's (A's) message as a FLOOD packet,
+// B's own reply (an ACK, carrying a reciprocal path so A can reach B
+// directly next time) is itself flooded back -- but nothing in that
+// exchange gives B a direct path back to A. B's out_path to A stays unknown
+// until B independently receives an explicit PATH packet from A. A plain
+// protocol property of BaseChatMesh, no bridge involved.
 //
-// Runs the REAL production BaseChatMesh::onPeerDataRecv() (not a
-// reimplementation), same approach as test_bridge_routing.
+// Runs the real production BaseChatMesh::onPeerDataRecv(), not a
+// reimplementation.
 #include <gtest/gtest.h>
 #include <helpers/BaseChatMesh.h>
 #include <cstring>

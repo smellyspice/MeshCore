@@ -121,12 +121,8 @@ void MyMesh::putBridgeNeighbour(const mesh::Identity &id, uint32_t timestamp, fl
 }
 
 void* MyMesh::findBridgeOnlyNextHop(const uint8_t* hash, uint8_t hash_size) const {
-  // If this identity has EVER been heard directly over local RF, local TX
-  // might still be the right medium for it (a node can be both RF- and
-  // bridge-reachable) -- decline rather than risk a wrong redirect. No time
-  // window here (unlike the bridge-side check below): any RF sighting ever,
-  // however old, is enough to withhold confidence -- errs toward today's
-  // safe "fall through" default.
+  // Any RF sighting, however old, disqualifies -- a node can be both RF- and
+  // bridge-reachable, so decline rather than risk a wrong redirect.
 #if MAX_NEIGHBOURS
   for (int i = 0; i < MAX_NEIGHBOURS; i++) {
     if (neighbours[i].heard_timestamp > 0 && neighbours[i].id.isHashMatch(hash, hash_size)) {
@@ -181,11 +177,9 @@ void MyMesh::queueDelayedIpSend(mesh::Packet* pkt) {
       clone->_src_bridge = NULL;   // in-memory only, not meaningful for a queued clone
 
       // Same formula shape as companion_radio's calcDirectTimeoutMillisFor(),
-      // using this packet's own visible outer hop count as a stand-in for
-      // the sender's (invisible, encrypted) taught-path length -- see
-      // planning/ip-bridge-mesh-safety.md. Target half that estimate, not
-      // the full value, for comfortable margin under the sender's own
-      // send-timeout.
+      // using this packet's own visible hop count as a stand-in for the
+      // sender's taught-path length. Target half the estimate for margin
+      // under the sender's own send-timeout.
       uint32_t airtime = _radio->getEstAirtimeFor(pkt->getPathByteLen() + pkt->payload_len + 2);
       uint32_t hops = pkt->getPathHashCount();
       uint32_t estimate = 500 + (airtime * 6 + 250) * (hops + 1);
@@ -647,11 +641,8 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
     espnow_bridge.sendPacket(pkt);
 #endif
 #ifdef WITH_IP_BRIDGE
-    // Only a PATH-return (the packet that actually decides which route a
-    // contact ends up using) gets held back, and only when there's a live
-    // RF neighbour to defer to -- see planning/ip-bridge-mesh-safety.md.
-    // Everything else (adverts, ordinary chat traffic) crosses immediately,
-    // same as before.
+    // Only PATH-returns get held back, and only with a live RF neighbour to
+    // defer to -- everything else crosses immediately.
     if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH && hasLiveRfNeighbour()) {
       queueDelayedIpSend(pkt);
     } else {
@@ -729,53 +720,27 @@ mesh::DispatcherAction MyMesh::onRecvPacket(mesh::Packet* pkt) {
 
 #ifdef WITH_BRIDGE
 bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
-  // Consume-once: whether or not it's used here, this must not silently
-  // apply to some later, unrelated send (e.g. a periodic self-advert firing
-  // before the next real packet is received) -- only the very next
-  // sendPacket() call after a bridge-sourced packet is processed is
-  // eligible, matching exactly the packet recv_pkt_source_bridge was set
-  // for. See its declaration in MyMesh.h.
-  //
-  // Age-bounded too: "next sendPacket() call" is only a safe proxy for
-  // "the reply to what I just received" if that next call actually happens
-  // right away. It doesn't always -- bridge heartbeat pongs, for instance,
-  // never go through Mesh::sendPacket() at all, so a bridge-sourced receive
-  // with no immediate reply can sit unconsumed indefinitely. Found live
-  // 2026-08-24: discover.neighbors()'s own broadcast probe (not a reply to
-  // anything) got redirected bridge-only because of exactly this staleness.
-  // Real same-turn reply generation is synchronous (same call stack, same
-  // millis() tick in practice), so a short bound here costs nothing for the
-  // intended case.
+  // Consume-once and age-bounded: only trusted as "the reply to what I just
+  // received" if the next sendPacket() call happens right away. Without the
+  // age bound, a receive with no immediate reply (bridge heartbeat pongs
+  // never call sendPacket() at all) could sit unconsumed and later misfire
+  // on an unrelated send.
   void* bridge = (millis() - recv_pkt_source_bridge_set_at < RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS)
                  ? recv_pkt_source_bridge : NULL;
   recv_pkt_source_bridge = NULL;
 
-  // DIRECT-route packets always carry their own explicit path[] of real hop
-  // hashes to follow -- letting them fall through to normal local TX (which
-  // then hits logTx()'s mirror-to-every-configured-bridge hook once the send
-  // completes) is what actually gets them to their real next hop, whether
-  // that's this same bridge, a DIFFERENT bridge, or a genuine local LoRa
-  // neighbor -- UNLESS one of the two narrow exceptions below applies. This
-  // "always do both, unless provably safe to skip RF" default is what
-  // 32e54bca and 8f47488b established after live-hardware misroute bugs;
-  // see test/test_smart_bridge_ack_misroute and test/test_dual_bridge_ack_mirror.
+  // DIRECT-route packets carry their own path[] -- default to falling
+  // through to normal local TX + logTx()'s bridge mirror (reaches the real
+  // next hop whichever medium it's on) unless one of the two exceptions
+  // below can prove it's safe to skip RF. See test_smart_bridge_ack_misroute
+  // / test_dual_bridge_ack_mirror for the misroute bugs this default guards.
   if (packet->isRouteDirect()) {
-    // Exception 1: a *freshly composed* zero-hop reply (path never
-    // decremented from a longer one -- path_len is 0 from the moment this
-    // packet was created) whose payload type can only ever reach here as a
-    // brand-new local reply, never as Mesh::routeDirectRecvAcks()'s
-    // decremented relay-in-transit shape (PAYLOAD_TYPE_ACK, and the
-    // MULTIPART wrapper it can arrive wrapped in) -- that's the ONE shape
-    // that must keep falling through unconditionally, since a 0-hop ack
-    // mid-relay means "local delivery, physically adjacent", the opposite
-    // of "this reply's destination is the bridge we just heard from", and
-    // is indistinguishable from a fresh reply by inspecting the outgoing
-    // packet alone. For every other DIRECT payload type, path_len==0
-    // unambiguously means "reply straight back to whoever I just heard this
-    // request from" -- exactly the node recv_pkt_source_bridge (the
-    // TRIGGERING packet's arrival bridge) names. Covers admin/CLI
-    // (PAYLOAD_TYPE_RESPONSE) and discover (PAYLOAD_TYPE_CONTROL) replies
-    // to a bridge-only client with no path of its own yet.
+    // Exception 1: a freshly-composed zero-hop reply (never decremented from
+    // a longer path). Excludes ACK/MULTIPART, which is the one payload type
+    // that can also arrive here as a decremented relay-in-transit ack
+    // (Mesh::routeDirectRecvAcks()) where zero-hop means local delivery, the
+    // opposite conclusion -- indistinguishable from a fresh reply by
+    // inspecting the packet alone, so that shape must always fall through.
     if (bridge != NULL && packet->getPathHashCount() == 0 &&
         packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
         packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
@@ -786,20 +751,11 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
       return true;
     }
 
-    // Exception 2: a real path with hops remaining, where the very next hop
-    // (path[0], after any of this repeater's own stripping already done by
-    // the caller) is an identity we've only ever heard over ONE specific
-    // bridge and NEVER over local RF (findBridgeOnlyNextHop() -- backed by
-    // the neighbour tables, not by how the TRIGGERING packet arrived, so
-    // this doesn't repeat 32e54bca's mistake of guessing "the bridge it
-    // came from"; it looks up where THIS destination is actually known to
-    // live). Covers the actual observed live symptom this fix was for: an
-    // ordinary CLI-over-chat reply (PAYLOAD_TYPE_TXT_MSG) to a companion one
-    // real hop away through a bridge-only intermediate repeater -- exception
-    // 1 above doesn't apply here since path_hash_count is 1, not 0. Safe for
-    // ACK/MULTIPART too, unlike exception 1: the redirect decision here
-    // never depends on distinguishing "fresh reply" from "relay-in-transit,"
-    // only on the next hop's own known reachability.
+    // Exception 2: a path with hops remaining, where the next hop
+    // (findBridgeOnlyNextHop()) is known bridge-only from the neighbour
+    // tables rather than guessed from how this packet arrived -- safe for
+    // ACK/MULTIPART too, since it doesn't depend on distinguishing fresh
+    // reply from relay-in-transit.
     if (packet->getPathHashCount() > 0) {
       void* target_bridge = findBridgeOnlyNextHop(packet->path, packet->getPathHashSize());
       if (target_bridge != NULL) {
@@ -825,33 +781,18 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
   return true;
 }
 
-// Relay-forwarding counterpart to trySendViaBridge() -- see its declaration
-// in MyMesh.h and planning/ip-bridge-mesh-safety.md gap #4's "relay-
-// forwarding" follow-up. Covers ordinary pass-through traffic
-// (REQ/RESPONSE/TXT_MSG/PATH relayed onward, not addressed to this node),
-// which never reaches trySendViaBridge() at all -- Mesh::onRecvPacket()
-// returns ACTION_RETRANSMIT* for it directly, without ever calling
-// sendPacket(). Confirmed live 2026-08-25: this traffic keeps keying local
-// RF even when the next hop is a repeater only reachable over a bridge
-// (different frequencies, no RF overlap at all) -- the dominant real-world
-// traffic pattern this session's earlier reply-only fix didn't touch.
+// Relay-forwarding counterpart to trySendViaBridge() -- covers ordinary
+// pass-through traffic (not addressed to this node), which never reaches
+// trySendViaBridge() since Mesh::onRecvPacket() returns ACTION_RETRANSMIT*
+// for it directly, without calling sendPacket().
 //
-// Deliberately does NOT reuse trySendViaBridge()'s exception 1 (the
-// recv_pkt_source_bridge/"arrived via bridge X, so reply via bridge X"
-// heuristic) -- that's only valid for a packet THIS repeater originates in
-// direct reply to something it just received. A relayed packet isn't
-// addressed to this repeater at all; its destination has no necessary
-// relationship to how the packet in hand arrived. Reusing that heuristic
-// here would reintroduce exactly the class of bug 32e54bca/8f47488b fixed
-// (blindly assuming "same bridge it came from" for a packet still carrying
-// real hops to follow). Only the identity-based lookup
-// (findBridgeOnlyNextHop(), backed by the neighbour tables, checking the
-// packet's own real next hop) is safe here, and only once this repeater's
-// own hash has already been stripped from path[] with real hops still
-// remaining -- a hop count of 0 at this point means there's no meaningful
-// next-hop identity left in path[] to look up (the packet is a single
-// local-delivery hop away from the true endpoint, whose identity was never
-// in path[] to begin with), so that case always falls through unchanged.
+// Does not reuse trySendViaBridge()'s zero-hop/recv_pkt_source_bridge
+// exception: that heuristic only holds for a packet this repeater originates
+// itself. A relayed packet's destination has no relationship to how it
+// arrived, so reusing it would reintroduce the misroute bugs
+// trySendViaBridge()'s own default guards against. Only the identity-based
+// lookup applies here, and only with real hops remaining -- zero hops left
+// means the destination was never in path[] to begin with.
 bool MyMesh::tryRelayViaBridge(mesh::Packet* packet) {
   if (packet->isRouteDirect() && packet->getPathHashCount() > 0) {
     void* target_bridge = findBridgeOnlyNextHop(packet->path, packet->getPathHashSize());
@@ -950,35 +891,15 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
                           const uint8_t *app_data, size_t app_data_len) {
   mesh::Mesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len); // chain to super impl
 
-  // if this a zero hop advert (and not via 'Share'), add it to neighbours.
-  // Adverts relayed in over a bridge also carry zero path hops (bridges
-  // don't touch path_len), so they must be split off into their own table
-  // -- see BridgeNeighbourInfo -- rather than being recorded as if this
-  // repeater heard them directly over its own radio.
-  // TEMP DIAGNOSTIC (planning/ip-bridge-mesh-safety.md gap #4 investigation)
-  // -- remove once bridge_neighbours[] population is confirmed working live.
-  BRIDGE_DEBUG_PRINTLN("onAdvertRecv: hops=%d src_bridge=%p is_espnow=%d is_ip=%d\n",
-                       (int)packet->getPathHashCount(), packet->_src_bridge,
-#ifdef WITH_ESPNOW_BRIDGE
-                       (int)(packet->_src_bridge == &espnow_bridge),
-#else
-                       0,
-#endif
-#ifdef WITH_IP_BRIDGE
-                       (int)(packet->_src_bridge == &ip_bridge)
-#else
-                       0
-#endif
-  );
-
+  // Zero-hop, non-Share adverts get added to neighbours. Adverts relayed in
+  // over a bridge also carry zero path hops (bridges don't touch path_len),
+  // so they're split off into bridge_neighbours instead of being recorded as
+  // heard directly over this repeater's own radio.
   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
     AdvertDataParser parser(app_data, app_data_len);
-    BRIDGE_DEBUG_PRINTLN("onAdvertRecv: parser valid=%d type=%d (REPEATER=%d)\n",
-                         (int)parser.isValid(), (int)parser.getType(), (int)ADV_TYPE_REPEATER);
     if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
 #ifdef WITH_BRIDGE
       if (packet->_src_bridge != NULL) {
-        BRIDGE_DEBUG_PRINTLN("onAdvertRecv: calling putBridgeNeighbour\n");
         putBridgeNeighbour(id, timestamp, packet->getSNR(), packet->_src_bridge);
       } else
 #endif
@@ -986,8 +907,6 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
         putNeighbour(id, timestamp, packet->getSNR());
       }
     }
-  } else {
-    BRIDGE_DEBUG_PRINTLN("onAdvertRecv: skipped (hops!=0 or isShare)\n");
   }
 }
 

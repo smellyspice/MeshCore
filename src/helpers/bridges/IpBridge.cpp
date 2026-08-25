@@ -80,8 +80,7 @@ bool IpBridge::setupTlsConfig() {
     return false;
   }
 
-  // PSK-only: no certificates of any kind are used, so there is nothing to verify
-  // via authmode -- see planning/ip-bridge-design.md for why PSK was chosen.
+  // PSK-only: no certificates, so nothing to verify via authmode.
   mbedtls_ssl_conf_authmode(&_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
   mbedtls_ssl_conf_rng(&_ssl_conf, mbedtls_ctr_drbg_random, &_ctr_drbg);
 
@@ -492,14 +491,11 @@ void IpBridge::pollConnectedIO() {
   // error under different timing, particularly on the write path.
   if (_state != State::CONNECTED) return;
 
-  // A peer restarting from a new source port (rather than the same one) won't
-  // be detected until the existing session's own heartbeat timeout expires --
-  // no separate parallel-accept/reconnect-detection path while CONNECTED. An
-  // earlier version of this attempted that (accepting a second, tentative
-  // connection on _listen_fd while already CONNECTED, verifying it on its own
-  // context, then promoting it) but hung the hub solid on real hardware and
-  // was removed rather than carried forward disabled; see git history and
-  // planning/ip-bridge-design.md for the investigation if this is revisited.
+  // A peer restarting from a new source port won't be detected until the
+  // existing session's own heartbeat timeout expires -- no separate parallel-
+  // accept/reconnect-detection path while CONNECTED. An earlier version
+  // attempted that but hung the server solid on real hardware; see git
+  // history if this is revisited.
 
   // bounded drain per loop() call -- responsive without hogging the main loop
   // if a burst of traffic arrives all at once

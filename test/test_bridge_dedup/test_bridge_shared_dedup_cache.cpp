@@ -1,16 +1,12 @@
-// Tests "theory 3" from planning/bridge-direct-routing-path-gap.md:
-// BridgeBase declares ONE SimpleMeshTables _seen_packets member, and every
-// concrete bridge (RS232Bridge, ESPNowBridge, IpBridge) checks/marks that
-// SAME instance from both directions -- BridgeBase::handleReceivedPacket()
-// on RX, and each bridge's own sendPacket() on TX (confirmed identical
-// 3-line guard in all three: `if (!_seen_packets.wasSeen(p)) { markSeen(p); ... }`,
-// see src/helpers/bridges/{RS232,ESPNow,Ip}Bridge.cpp).
+// BridgeBase declares one SimpleMeshTables _seen_packets member, checked/
+// marked from both directions -- BridgeBase::handleReceivedPacket() on RX,
+// each bridge's own sendPacket() on TX. RS232Bridge and ESPNowBridge still
+// share this single instance; IpBridge has its own separate _tx_seen table
+// instead (see IpBridge.h).
 //
-// This uses the REAL production mesh::SimpleMeshTables class (not a
-// reimplementation) -- the actual defect is in how BridgeBase shares one
-// instance across both call sites, which this test reproduces directly by
-// mirroring those two real call sites against one shared table, exactly as
-// BridgeBase's declaration does.
+// Uses the real production mesh::SimpleMeshTables class, mirroring the two
+// real call sites against one shared table exactly as RS232Bridge/
+// ESPNowBridge's declarations do.
 #include <gtest/gtest.h>
 #include "helpers/SimpleMeshTables.h"
 

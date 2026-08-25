@@ -11,48 +11,29 @@
 #include <mbedtls/entropy.h>
 
 /**
- * @brief Bridge implementation over UDP + DTLS-PSK, for a single point-to-point
- * point-to-point IP link between exactly two paired MeshCore nodes.
+ * @brief Bridge over UDP + DTLS-PSK, for a point-to-point IP link between
+ * exactly two paired MeshCore nodes.
  *
- * See planning/ip-bridge-design.md for the full design rationale. Summary
- * of the decisions that shape this class:
- *
- * - UDP, not TCP: mbedtls_net_connect() has no non-blocking variant for TCP (it
- *   performs a blocking DNS resolution and TCP handshake). A UDP socket's connect()
- *   is local-only bookkeeping, and DTLS's handshake is explicitly designed to be
- *   timer-driven from an external loop rather than requiring a blocking thread --
- *   see mbedtls_ssl_set_timer_cb() below. This keeps the bridge a synchronous,
- *   single-threaded state machine like RS232Bridge/ESPNowBridge, with no FreeRTOS
- *   task and no thread-safety surface.
- * - Best-effort, fire-and-forget: no bridge-level packet retry, consistent with
- *   ESPNowBridge (esp_now_send() is one-shot; there's no ack/retry anywhere in the
- *   mesh/repeater layer for relay traffic).
+ * - UDP, not TCP: mbedtls_net_connect() has no non-blocking TCP variant.
+ *   Keeps the bridge a synchronous, single-threaded state machine like
+ *   RS232Bridge/ESPNowBridge, with no FreeRTOS task or thread-safety surface.
+ * - Best-effort, fire-and-forget: no bridge-level packet retry, consistent
+ *   with ESPNowBridge.
  * - Role is inferred from config, not a build-time choice:
- *     _prefs->ip_host set   -> CLIENT: dials out to ip_host:ip_port.
+ *     _prefs->ip_host set -> CLIENT: dials out to ip_host:ip_port.
  *     _prefs->ip_host empty, ip_port set -> SERVER: listens on ip_port,
- *       accepts datagrams from the first peer that completes a valid DTLS-PSK
- *       handshake, then locks (connects) the socket to that one peer address.
- *       DOES implement mbedTLS's HelloVerifyRequest/cookie mechanism
- *       (_cookie_ctx below), even though its usual purpose -- letting one bind
- *       socket track many simultaneous clients -- doesn't apply here (exactly
- *       one peer, ever, by design -- see planning doc). It's kept anyway
- *       because it doubles as UDP source-address return-routability proof: an
- *       attacker who spoofs another host's IP as the datagram source can't
- *       complete the cookie round trip (the HelloVerifyRequest goes to the
- *       spoofed address, not to them), so they can never provoke the larger
- *       ServerHello/ServerKeyExchange/ServerHelloDone flight -- closing off
- *       using this bridge as a reflection/amplification vector against a
- *       third party. Without it, only the small HelloVerifyRequest itself
- *       could ever be sent toward a spoofed address instead.
- * - Dead-link detection is app-level (ping/pong heartbeat, N consecutive misses),
- *   because UDP/DTLS gives no OS-level "connection dropped" signal at all.
- * - DNS (client/spoke side only) is failure-triggered, not proactive: on
- *   reconnect, retries the last known-good IP first; only re-resolves via
- *   WiFi.hostByName() (bounded ~15s worst case, not mbedTLS's fully blocking
- *   resolver) after a couple of consecutive failures against the cached IP.
+ *       accepts the first peer to complete a DTLS-PSK handshake, then locks
+ *       the socket to that address. Implements mbedTLS's HelloVerifyRequest/
+ *       cookie exchange (_cookie_ctx below) as return-routability proof
+ *       against source-address spoofing, closing off reflection/
+ *       amplification abuse -- not for its usual multi-client purpose, since
+ *       there's exactly one peer here by design.
+ * - Dead-link detection is app-level (ping/pong heartbeat, N consecutive
+ *   misses), since UDP/DTLS gives no OS-level disconnect signal.
+ * - DNS (client side only) is failure-triggered: reconnect retries the last
+ *   known-good IP first, only re-resolving after consecutive failures.
  *
- * Wire framing (once the DTLS session is up) mirrors RS232Bridge exactly, since a
- * DTLS record stream, like serial, needs explicit message framing:
+ * Wire framing (once the DTLS session is up) mirrors RS232Bridge:
  * [2 bytes] Magic Header (0xC03E)
  * [2 bytes] Payload Length
  * [n bytes] Mesh Packet Payload
@@ -91,45 +72,29 @@ private:
   State _state = State::IDLE;
   unsigned long _next_action_at = 0;
 
-  // BridgeBase's inherited _seen_packets is checked/marked by BOTH the RX
-  // path (handleReceivedPacket(), inherited unchanged) and, by the same
-  // established pattern ESPNowBridge/RS232Bridge use, the TX path. Sharing
-  // one table between the two means a packet that legitimately needs to
-  // cross in one direction can be silently dropped because identical
-  // content already crossed the other way -- no log, no error. Giving TX
-  // its own table here removes that false-positive for this bridge without
-  // touching BridgeBase or the other bridge types.
+  // BridgeBase's inherited _seen_packets is shared between RX and TX; a
+  // packet needing to cross in one direction could be silently dropped
+  // because identical content already crossed the other way. Separate TX
+  // table removes that false-positive for this bridge only.
   SimpleMeshTables _tx_seen;
 
-  // Throttles how often HANDSHAKING polls mbedtls_ssl_handshake(), independent
-  // of mbedTLS's own DTLS retransmit backoff (which only paces re-sending the
-  // flight, not how often we call in to check). Without this, loop() calls
-  // pollHandshake() on every single tick -- and each call blocks for up to
-  // mbedtls_ssl_conf_read_timeout()'s 1ms via a real select() inside
-  // mbedtls_net_recv_timeout() when no reply is available (e.g. peer
-  // unreachable). That capped the whole main loop at ~1kHz and starved
-  // everything else sharing it (CLI serial reads, mesh dispatch, LEDs) --
-  // confirmed live via a spoke pointed at an unreachable hub. See
-  // planning/ip-bridge-design.md.
+  // Throttles how often HANDSHAKING polls mbedtls_ssl_handshake(). Without
+  // this, each poll blocks up to 1ms in mbedtls_net_recv_timeout() when the
+  // peer is unreachable, capping the whole main loop at ~1kHz and starving
+  // CLI/mesh dispatch/LEDs -- confirmed live against an unreachable peer.
   unsigned long _next_handshake_poll_at = 0;
 
-  // last known-good IP for the client role, so most reconnects skip DNS entirely
+  // Last known-good IP for the client role, so most reconnects skip DNS.
   char _resolved_ip[16] = {0};
   uint8_t _consecutive_connect_failures = 0;
 
-  // heartbeat / dead-link detection (the only way to know the link is down at all,
-  // since UDP/DTLS gives no OS-level disconnect signal -- see class comment).
-  // Only the client/spoke sends pings on its own initiative (_next_ping_at);
-  // the server/hub never independently pings -- it has nothing useful to say
-  // unprompted, and doing so would need its own peer to still be listening,
-  // which is exactly what's in question. Both roles use the SAME passive
-  // watchdog though: _last_rx_at updates on ANY valid received frame (ping,
-  // pong, or a real mesh packet), not just pongs specifically -- if it only
-  // tracked pongs, the hub (which never sends pings, so never receives a pong)
-  // would immediately think the link was dead. Simple time-since-last-rx
-  // watchdog rather than a per-ping miss counter: if too long has passed since
-  // anything was heard, the link is dead, full stop -- equivalent to "N
-  // consecutive misses" without needing to track N separately.
+  // Heartbeat / dead-link detection -- the only way to know the link is down,
+  // since UDP/DTLS gives no OS-level disconnect signal. Only the client
+  // pings on its own initiative; the server never sends pings, so both
+  // roles instead watch _last_rx_at, updated on any valid received frame
+  // (ping, pong, or a real mesh packet). If too long has passed since
+  // anything was heard, the link is dead -- a simple time-since-last-rx
+  // check rather than a per-ping miss counter.
   unsigned long _last_rx_at = 0;
   unsigned long _next_ping_at = 0;
 
