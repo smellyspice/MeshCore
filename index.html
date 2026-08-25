@@ -456,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta2"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta3"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -632,6 +632,22 @@
     </ul>
   </section>
 
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 3</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      Repeater firmware only, same three boards as beta 2. No-LoRa companion
+      assets are unchanged, still on the
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
+    </p>
+    <ul>
+      <li><strong>Fixed</strong> &mdash; a repeater's own broadcast traffic (adverts, flood replies) could get misrouted to a single bridge instead of reaching everyone. The heuristic that redirects a genuine <em>reply</em> straight back out the bridge it arrived from was also catching FLOOD-route sends and zero-hop self-adverts, both of which are meant to reach everyone, not bounce back to one peer. Found live: a repeater's own self-advert would silently fail to reach a peer repeater over the bridge whenever it happened to fire shortly after any unrelated bridge traffic. Fixed for both cases — always falls back to broadcasting to everyone whenever it isn't confidently a genuine reply.</li>
+      <li><strong>New</strong> &mdash; the RF-preference delay from beta 2 (previously scoped to just the path-return reply) now covers first contact too: the first request, response, text message, or admin login between two new peers. Before this, first contact between two nodes had no RF-preference protection at all — the IP bridge could win the race for the very first exchange and get baked permanently into the learned route, even when a working RF path existed.</li>
+      <li><strong>New</strong> &mdash; that delay now skips entirely when the destination is already confidently known to be reachable only over a bridge (e.g. an ESP&#8209;NOW-only companion with no LoRa radio at all), so the two main use cases for this feature aren't taxed with pointless latency.</li>
+      <li><strong>Changed</strong> &mdash; bridge-neighbour tracking now recognizes companions, not just other repeaters, which the fix above needs to actually detect a bridge-only companion as bridge-only. The stock, RF-only <code>neighbors</code> CLI table is unchanged. Table size now matches the RF-neighbour table instead of a fixed cap of 8.</li>
+    </ul>
+  </section>
+
   <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
 
   <section>
@@ -654,7 +670,7 @@
       <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta2">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta3">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
