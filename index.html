@@ -343,6 +343,9 @@
   .callout ul { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.95rem; }
   .callout li { margin-bottom: 0.35rem; }
   .callout li:last-child { margin-bottom: 0; }
+  section > ul { margin: 1.25rem 0; padding-left: 1.2rem; }
+  section > ul li { margin-bottom: 0.7rem; line-height: 1.55; }
+  section > ul li:last-child { margin-bottom: 0; }
 
   /* ---------- limitations ---------- */
   .limit {
@@ -453,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta2"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -596,16 +599,37 @@
       <div class="limit-mark">NAT</div>
       <div class="limit-body">
         <h3>Port forwarding — but only on one side</h3>
-        <p>Only the hub side of an IP bridge link needs one UDP port forwarded. The other side dials out and works behind any standard NAT with zero config. If your hub-side ISP uses CGNAT, port forwarding won't be possible there — you'd need a small VPS or similar instead.</p>
+        <p>Only the server side of an IP bridge link needs one UDP port forwarded. The other side dials out and works behind any standard NAT with zero config. If your server-side ISP uses CGNAT, port forwarding won't be possible there — you'd need a small VPS or similar instead.</p>
       </div>
     </div>
     <div class="limit">
       <div class="limit-mark">git</div>
       <div class="limit-body">
         <h3>This is a personal fork, not upstream MeshCore</h3>
-        <p>Nothing here has been merged or reviewed by the MeshCore maintainers. It's beta-stage, tested so far on Xiao S3 WIO and Heltec V3/V4, and there are still open validation items in the design notes. The plan is to open a PR against upstream MeshCore once it's had enough real-world testing and validation to be worth proposing — that's exactly what this round of testing is for.</p>
+        <p>Nothing here has been merged or reviewed by the MeshCore maintainers. It's beta-stage, tested so far on Xiao S3 WIO and Heltec V3/V4, and there are still open validation items in the design notes. The plan is to open a PR against upstream MeshCore once it's had enough real-world testing and validation to be worth proposing — that's exactly what this round of testing is for. In the meantime, treat every release here as a developer build for people willing to help shake it out — not something to put on a mesh anyone (including a future you) actually depends on. MeshCore itself is a volunteer, amateur-run project; this fork is several steps rawer than that.</p>
       </div>
     </div>
+  </section>
+
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 2</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      Repeater firmware only this round (Xiao S3 WIO, Heltec V3, Heltec V4
+      &mdash; V4 wasn't flashed to real hardware for this round, but shares
+      the exact same radio driver and only touches shared, board-agnostic
+      code, so it's included on that basis). No-LoRa companion assets are
+      unchanged, still on the
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
+    </p>
+    <ul>
+      <li><strong>Fixed</strong> &mdash; a repeater no longer keys its LoRa radio for traffic that's only reachable over a bridge. Previously any reply or relayed message always broadcast over local RF <em>and</em> mirrored to the bridge, even when the destination had no radio at all (e.g. a companion reachable only through an ESP&#8209;NOW/IP bridge chain). Covers both replies a repeater composes itself and ordinary message relaying through it — always falls back to broadcasting both ways whenever it isn't confidently sure, so this never risks silent delivery failures.</li>
+      <li><strong>Fixed</strong> &mdash; a routing edge case where an internal "this came from a bridge" flag could, in rare timing windows, misapply to an unrelated later packet. Found and fixed during beta testing.</li>
+      <li><strong>New</strong> &mdash; <code>neighbors.all</code> CLI command, merging RF-heard and bridge-heard neighbours into one list with a <code>via</code> column, without changing the existing <code>neighbors</code> command's output.</li>
+      <li><strong>New</strong> &mdash; an IP-bridge path-return delay: when a repeater has a live RF neighbour, it briefly holds back mirroring a learned-path packet over the IP bridge, giving a genuine RF path a head start instead of letting the IP link win a route race it shouldn't.</li>
+      <li><strong>New</strong> &mdash; NTP-based clock sync for boards with no battery-backed RTC.</li>
+      <li><strong>New tool</strong> &mdash; <code>watch_boards.py</code>, attached to this release: auto-connects to every attached board's serial port at once and streams live, color-coded, multi-board debug output in one terminal, with payload-type annotation, advert name/coordinate decoding, and the routing decisions above highlighted in their own colors. This release ships with debug logging left on specifically so this tool has something to show.</li>
+    </ul>
   </section>
 
   <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
@@ -628,9 +652,9 @@
 <span class="k">set</span> wifi.pwd &lt;your password&gt;
 <span class="k">set</span> ip.host &lt;peer host or IP&gt;</pre>
       <p style="margin-top: 0.8rem;">
-        Don't want to set up PlatformIO? Prebuilt binaries for all three
-        wave&#8209;1 boards are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a>
+        Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
+        Heltec V3, and Heltec V4 are on the
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta2">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
@@ -647,7 +671,9 @@
         radio, so it uses zero LoRa airtime. Flash it the same way as a
         repeater (grab
         <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">releases page</a>,
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 releases page</a>
+        — unchanged since beta&nbsp;1, so still there rather than on the
+        newer repeater-firmware release —
         or <a href="https://github.com/smellyspice/MeshCore/blob/espnow-ip-bridge/README.md">build it yourself</a>),
         then one extra step: there's no phone-app UI yet for its
         ESP&#8209;NOW channel/secret, so it needs a small script (also
