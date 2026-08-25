@@ -3,12 +3,13 @@
 // single-bridge fix doesn't exercise.
 //
 // trySendViaBridge()'s "redirect back out the originating bridge" behavior
-// is only correct for FLOOD-route replies with no path of their own (e.g.
-// sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies). A
-// DIRECT-route packet always carries a real path[] to follow -- bouncing it
-// back the way it came is only coincidentally correct when it happens to
-// have 0 hops left (single-bridge, last-hop case). Gate on
-// packet->isRouteDirect(), not path hash count.
+// only applies to DIRECT-route packets -- a DIRECT-route packet always
+// carries a real path[] to follow, so bouncing it back the way it came is
+// only safe when specific exceptions can prove it. FLOOD-route packets are
+// never redirected: they're meant to reach everyone, and "did I recently
+// process something from a bridge" can't tell a genuine reply apart from an
+// unrelated FLOOD send (e.g. a self-advert) -- they always fall through to
+// normal local TX + logTx()'s mirror-to-every-bridge instead.
 //
 // Drives the real Mesh::onRecvPacket/routeDirectRecvAcks and real
 // Dispatcher::loop()/checkSend() send-completion cycle (not just the
@@ -200,10 +201,13 @@ protected:
     recv_pkt_source_bridge = nullptr;
 
     if (packet->isRouteDirect()) {
-      // Exception 1: freshly-composed zero-hop reply, non-ACK/MULTIPART.
+      // Exception 1: freshly-composed zero-hop reply, non-ACK/MULTIPART/ADVERT
+      // (a self-advert is also zero-hop DIRECT via sendZeroHop(), but is
+      // never a reply to anything).
       if (bridge != nullptr && packet->getPathHashCount() == 0 &&
           packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
-          packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
+          packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART &&
+          packet->getPayloadType() != PAYLOAD_TYPE_ADVERT) {
         ((AbstractBridge*)bridge)->sendPacket(packet);
         releasePacket(packet);
         return true;
@@ -224,11 +228,12 @@ protected:
       return false;   // has its own path[] to follow -- fall through to normal local TX (-> logTx mirror)
     }
 
-    if (bridge == nullptr) return false;
-
-    ((AbstractBridge*)bridge)->sendPacket(packet);
-    releasePacket(packet);
-    return true;
+    // FLOOD-route packets are meant to reach everyone -- "did I receive
+    // anything via a bridge in the last second" can't tell a genuine reply
+    // apart from an unrelated FLOOD send (e.g. a self-advert), so never
+    // redirect these. Always fall through to local broadcast + logTx mirror.
+    (void)bridge;
+    return false;
   }
 
   // Mirrors MyMesh::tryRelayViaBridge() (MyMesh.cpp) -- relay-forwarding
@@ -358,6 +363,19 @@ Packet* makeZeroHopDirectResponse() {
   return p;
 }
 
+// A self-advert -- sendZeroHop() sends these as zero-hop DIRECT too (not
+// FLOOD), the same shape as a fresh reply, but it's never a reply to
+// anything that arrived over a bridge.
+Packet* makeZeroHopDirectAdvert() {
+  Packet* p = new Packet();
+  p->header = ROUTE_TYPE_DIRECT | (PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT);
+  p->path_len = 0;
+  uint8_t body[4] = {9, 9, 9, 9};
+  memcpy(p->payload, body, sizeof(body));
+  p->payload_len = sizeof(body);
+  return p;
+}
+
 // A FLOOD-route reply with no path of its own -- the shape of
 // sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies, the two
 // scenarios trySendViaBridge's bridge-redirect behavior was designed for.
@@ -440,58 +458,101 @@ TEST(DualBridgeAckMirror, DirectAckWithRemainingHopFallsThroughAndReachesEspNowB
          "harmless, the peer will dedup it";
 }
 
-// Regression guard: the two reply mechanisms trySendViaBridge's
-// bridge-redirect behavior was originally built and validated for
-// (sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-chat replies) must
-// keep working -- these are FLOOD-route packets with no path of their own,
-// where bouncing back out the originating bridge is the ONLY way back to
-// the requester on the far side.
-TEST(DualBridgeAckMirror, FloodReplyStillRedirectsBackOutOriginatingBridge) {
+// A FLOOD-route reply (sendFloodReply()'s REQ/RESPONSE and TXT_MSG/CLI-over-
+// chat replies) no longer gets redirected bridge-only based on "did I just
+// process a bridge-sourced request" -- that signal can't distinguish a
+// genuine reply from an unrelated FLOOD send (see the self-advert misroute
+// this was found from). It now falls through to normal local TX, which
+// logTx() mirrors to every configured bridge -- still reaches a bridge-only
+// requester, just via the same mirror path any other FLOOD send uses.
+TEST(DualBridgeAckMirror, FloodReplyFallsThroughAndMirrorsToAllBridges) {
   TestTrifectaMesh repeater(0x73);
   repeater.recv_pkt_source_bridge = &repeater.ip_bridge;   // as if just processed a bridge-sourced request
 
   repeater.sendPacket(makeFloodReply(), 0, 0);
+  repeater.pumpSendCycle();
 
   EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
-      << "a FLOOD-route reply with no path of its own must still be "
-         "redirected back out the bridge it arrived from";
-  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+      << "still reaches the bridge that made the request, via logTx()'s mirror";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "logTx() mirrors to every configured bridge, not just the originating one";
+}
+
+// The bug this test guards against: an unrelated self-generated FLOOD send
+// (e.g. an advert triggered by the user) landing inside recv_pkt_source_bridge's
+// age window must never get treated as if it were a reply to whatever was
+// last received over a bridge -- there's no way to verify the two are
+// actually related, so it must always fall through to a real broadcast
+// rather than being silently redirected to one bridge only.
+TEST(DualBridgeAckMirror, UnrelatedFloodSendDoesNotGetTreatedAsBridgeReply) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.ip_bridge;   // an unrelated recent bridge-sourced receive
+  repeater.recv_pkt_source_bridge_set_at = repeater.clock.getMillis();   // still fresh
+
+  repeater.sendPacket(makeFloodReply(), 0, 0);
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "must reach every bridge via the normal mirror, not be redirected "
+         "bridge-only to whichever bridge happened to deliver something recently";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1);
+}
+
+// The actual self-advert shape (found live): sendZeroHop() sends a
+// self-advert as zero-hop DIRECT, not FLOOD -- so it hits Exception 1
+// (freshly-composed zero-hop reply), not the FLOOD path above. Without
+// excluding ADVERT there too, a self-advert generated shortly after any
+// unrelated bridge-sourced receive gets mistaken for the reply and bounced
+// back out that one bridge instead of broadcasting normally.
+TEST(DualBridgeAckMirror, ZeroHopDirectSelfAdvertDoesNotGetTreatedAsBridgeReply) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.espnow_bridge;   // an unrelated recent bridge-sourced receive
+  repeater.recv_pkt_source_bridge_set_at = repeater.clock.getMillis();   // still fresh
+
+  repeater.sendPacket(makeZeroHopDirectAdvert(), 0, 0);
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "must reach every bridge via the normal mirror, not be redirected "
+         "bridge-only to whichever bridge happened to deliver something recently";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1);
 }
 
 // recv_pkt_source_bridge is "consume-once" but was previously unbounded in
 // age -- if nothing gets sent for a while after a bridge-sourced receive
 // (bridge heartbeat pongs don't go through Mesh::sendPacket() at all), a
-// stale flag could misfire on a later, unrelated send. A broadcast FLOOD
-// send unrelated to any prior receive must reach both bridges, not get
-// redirected bridge-only just because a receive happened long ago and was
-// never consumed by an intervening send.
+// stale flag could misfire on a later, unrelated send. Only DIRECT-route
+// exception 1 (a fresh zero-hop reply) still consults this age bound --
+// FLOOD sends never redirect at all now, regardless of age (see the tests
+// above).
 TEST(DualBridgeAckMirror, StaleRecvPktSourceBridgeDoesNotMisrouteUnrelatedSend) {
   TestTrifectaMesh repeater(0x73);
   repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
   repeater.recv_pkt_source_bridge_set_at = 0;          // "received" at t=0
   repeater.clock._now = RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS + 1;   // long after, nothing sent in between
 
-  repeater.sendPacket(makeFloodReply(), 0, 0);
+  repeater.sendPacket(makeZeroHopDirectResponse(), 0, 0);
 
   EXPECT_EQ(repeater.ip_bridge.send_calls, 0)
       << "a stale recv_pkt_source_bridge must not redirect an unrelated later send";
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0)
       << "trySendViaBridge declining just means 'fall through to normal "
-         "local TX', which this synthetic FLOOD packet doesn't actually "
-         "drive through a full send cycle -- the point here is only that "
-         "it did NOT get redirected";
+         "local TX', which this synthetic packet doesn't actually drive "
+         "through a full send cycle -- the point here is only that it did "
+         "NOT get redirected";
 }
 
 // Regression guard: a FRESH recv_pkt_source_bridge (well within the age
-// bound) must still redirect exactly as before -- the fix narrows when the
-// flag is trusted, it doesn't disable the mechanism.
+// bound) must still redirect a zero-hop DIRECT reply exactly as before --
+// the fix narrows when the flag is trusted, it doesn't disable the
+// mechanism for the case it's still valid for.
 TEST(DualBridgeAckMirror, FreshRecvPktSourceBridgeStillRedirects) {
   TestTrifectaMesh repeater(0x73);
   repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
   repeater.recv_pkt_source_bridge_set_at = 0;
   repeater.clock._now = RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS - 1;   // just under the bound
 
-  repeater.sendPacket(makeFloodReply(), 0, 0);
+  repeater.sendPacket(makeZeroHopDirectResponse(), 0, 0);
 
   EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
       << "a fresh flag (well within the age bound) must still redirect normally";

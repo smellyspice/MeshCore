@@ -186,7 +186,8 @@ void MyMesh::queueDelayedIpSend(mesh::Packet* pkt) {
 
       pending_ip_sends[i].packet = clone;
       pending_ip_sends[i].release_at = millis() + estimate / 2;
-      BRIDGE_DEBUG_PRINTLN("queueDelayedIpSend: holding PATH packet for %ums (slot %d)\n", (unsigned)(estimate / 2), i);
+      BRIDGE_DEBUG_PRINTLN("queueDelayedIpSend: holding type=%d packet for %ums (slot %d)\n",
+                           (int)pkt->getPayloadType(), (unsigned)(estimate / 2), i);
       return;
     }
   }
@@ -199,7 +200,8 @@ void MyMesh::flushPendingIpSends() {
   unsigned long now = millis();
   for (int i = 0; i < MAX_PENDING_IP_SENDS; i++) {
     if (pending_ip_sends[i].packet != NULL && (long)(now - pending_ip_sends[i].release_at) >= 0) {
-      BRIDGE_DEBUG_PRINTLN("flushPendingIpSends: releasing held PATH packet (slot %d)\n", i);
+      BRIDGE_DEBUG_PRINTLN("flushPendingIpSends: releasing held type=%d packet (slot %d)\n",
+                           (int)pending_ip_sends[i].packet->getPayloadType(), i);
       ip_bridge.sendPacket(pending_ip_sends[i].packet);
       releasePacket(pending_ip_sends[i].packet);
       pending_ip_sends[i].packet = NULL;
@@ -641,9 +643,23 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
     espnow_bridge.sendPacket(pkt);
 #endif
 #ifdef WITH_IP_BRIDGE
-    // Only PATH-returns get held back, and only with a live RF neighbour to
-    // defer to -- everything else crosses immediately.
-    if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH && hasLiveRfNeighbour()) {
+    // Route-establishing packets -- the first message to a new peer, and any
+    // reply that teaches a return path -- get held back with a live RF
+    // neighbour to defer to, unless the destination is already confidently
+    // known to be reachable only over a bridge (e.g. an ESP-NOW-only
+    // companion with no LoRa radio at all), in which case there's no RF
+    // alternative to wait for and delaying would be pure latency for no
+    // benefit. dest_hash is the first payload byte, cleartext by protocol
+    // design, for every one of these types -- same lookup
+    // findBridgeOnlyNextHop() already does for DIRECT-route redirects,
+    // reused here against the destination instead of the next hop.
+    bool is_route_establishing = pkt->getPayloadType() == PAYLOAD_TYPE_PATH ||
+                                  pkt->getPayloadType() == PAYLOAD_TYPE_REQ ||
+                                  pkt->getPayloadType() == PAYLOAD_TYPE_RESPONSE ||
+                                  pkt->getPayloadType() == PAYLOAD_TYPE_TXT_MSG ||
+                                  pkt->getPayloadType() == PAYLOAD_TYPE_ANON_REQ;
+    if (is_route_establishing && pkt->payload_len > 0 && hasLiveRfNeighbour() &&
+        findBridgeOnlyNextHop(pkt->payload, 1) == NULL) {
       queueDelayedIpSend(pkt);
     } else {
       ip_bridge.sendPacket(pkt);
@@ -741,9 +757,15 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
     // (Mesh::routeDirectRecvAcks()) where zero-hop means local delivery, the
     // opposite conclusion -- indistinguishable from a fresh reply by
     // inspecting the packet alone, so that shape must always fall through.
+    // Also excludes ADVERT: sendZeroHop() sends a self-advert as zero-hop
+    // DIRECT too, but it's never a reply to anything -- if this node just
+    // processed an unrelated bridge-sourced receive within the age window,
+    // its own next self-advert would otherwise get mistaken for the reply
+    // and bounced back out that same bridge instead of broadcasting normally.
     if (bridge != NULL && packet->getPathHashCount() == 0 &&
         packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
-        packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
+        packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART &&
+        packet->getPayloadType() != PAYLOAD_TYPE_ADVERT) {
       BRIDGE_DEBUG_PRINTLN("trySendViaBridge: zero-hop DIRECT reply (type=%d), redirecting bridge-only -- no relay ambiguity for this payload type\n",
                            (int)packet->getPayloadType());
       ((AbstractBridge *)bridge)->sendPacket(packet);
@@ -772,13 +794,13 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
     return false;
   }
 
-  if (bridge == NULL) return false;
-
-  BRIDGE_DEBUG_PRINTLN("trySendViaBridge: redirecting FLOOD-route type=%d back out originating bridge\n",
-                       (int)packet->getPayloadType());
-  ((AbstractBridge *)bridge)->sendPacket(packet);
-  releasePacket(packet);   // normally freed after local TX completes -- this path bypasses that entirely
-  return true;
+  // FLOOD-route packets (adverts, flood replies) are meant to reach everyone,
+  // not just whichever bridge happened to deliver something recently -- the
+  // "did I receive anything via a bridge in the last second" signal can't
+  // distinguish a genuine reply from an unrelated packet (e.g. a self-advert)
+  // that just happens to send next. Always fall through to normal local
+  // broadcast + logTx()'s bridge mirror instead.
+  return false;
 }
 
 // Relay-forwarding counterpart to trySendViaBridge() -- covers ordinary
@@ -895,15 +917,21 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
   // over a bridge also carry zero path hops (bridges don't touch path_len),
   // so they're split off into bridge_neighbours instead of being recorded as
   // heard directly over this repeater's own radio.
+  //
+  // neighbours[] stays Repeater-only (stock behaviour, unchanged, backs the
+  // stock 'neighbors' CLI command). bridge_neighbours[] accepts any valid
+  // advert type -- it's fork-only and specifically needs to recognize
+  // bridge-only companions (e.g. a LoRa-less ESP-NOW companion) as
+  // confidently bridge-reachable, not just other repeaters.
   if (packet->getPathHashCount() == 0 && !isShare(packet)) {
     AdvertDataParser parser(app_data, app_data_len);
-    if (parser.isValid() && parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
+    if (parser.isValid()) {
 #ifdef WITH_BRIDGE
       if (packet->_src_bridge != NULL) {
         putBridgeNeighbour(id, timestamp, packet->getSNR(), packet->_src_bridge);
       } else
 #endif
-      {
+      if (parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
         putNeighbour(id, timestamp, packet->getSNR());
       }
     }

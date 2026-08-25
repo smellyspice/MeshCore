@@ -68,7 +68,14 @@ struct NeighbourInfo {
 };
 
 #ifndef MAX_BRIDGE_NEIGHBOURS
-  #define MAX_BRIDGE_NEIGHBOURS   8
+  // Sized to match MAX_NEIGHBOURS -- same population source (adverts heard
+  // at 0 hops), so no reason for a smaller cap. Falls back to a small
+  // default on a board where MAX_NEIGHBOURS isn't set at all.
+  #if defined(MAX_NEIGHBOURS) && MAX_NEIGHBOURS > 0
+    #define MAX_BRIDGE_NEIGHBOURS   MAX_NEIGHBOURS
+  #else
+    #define MAX_BRIDGE_NEIGHBOURS   8
+  #endif
 #endif
 
 // Kept separate from neighbours[] so the RF-awareness check in
