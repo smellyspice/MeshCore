@@ -93,6 +93,21 @@ struct BridgeNeighbourInfo {
 #define BRIDGE_VIA_ESPNOW   2
 #define BRIDGE_VIA_IP       3
 
+// How long a bridge_neighbours[] entry stays trusted enough for
+// findBridgeOnlyNextHop() to redirect on it -- same generous-on-purpose
+// reasoning as RF_AWARENESS_WINDOW_SECS below (a stale-but-still-used entry
+// only costs an unnecessary bridge send attempt; a too-eager entry could
+// misroute). Defined unconditionally (not just under WITH_IP_BRIDGE) since
+// findBridgeOnlyNextHop() applies to any bridge type.
+#define BRIDGE_NEIGHBOUR_FRESHNESS_SECS   (30 * 60)
+
+// Max age for recv_pkt_source_bridge to still be trusted by trySendViaBridge()
+// -- generous for genuine same-turn reply processing (which is synchronous,
+// same millis() tick in practice) but far too short for it to still be "the
+// same request" after other unrelated activity. See recv_pkt_source_bridge's
+// declaration above.
+#define RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS   1000
+
 #ifdef WITH_IP_BRIDGE
 // A PATH-return crossing the IP bridge is the packet that decides which
 // route (RF or IP) a contact ends up using -- see
@@ -154,6 +169,16 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   // void* (not AbstractBridge*) to avoid a new #include here; cast back to
   // AbstractBridge* at the point it's actually used.
   void* recv_pkt_source_bridge;
+  // millis() timestamp recv_pkt_source_bridge was last set -- "consume-once"
+  // only guarantees it's cleared by the NEXT sendPacket() call, not that one
+  // happens soon. If nothing gets sent for a while after a bridge-sourced
+  // receive (plausible -- bridge heartbeat pongs don't go through
+  // Mesh::sendPacket() at all), the stale flag can misfire on some later,
+  // completely unrelated locally-initiated send. trySendViaBridge() checks
+  // this age and ignores the flag once it's too old. See
+  // planning/ip-bridge-mesh-safety.md gap #4 (staleness bug found live
+  // 2026-08-24 via discover.neighbors's own probe getting misrouted).
+  unsigned long recv_pkt_source_bridge_set_at;
   TransportKey default_scope;
   RateLimiter discover_limiter, anon_limiter;
   uint32_t pending_discover_tag;
@@ -196,6 +221,15 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #ifdef WITH_BRIDGE
   void putBridgeNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr, const void* src_bridge);
   void formatAllNeighborsReply(char* reply);
+  // Looks up a DIRECT packet's next hop (path[0], truncated identity hash)
+  // against the neighbour tables: returns the specific bridge instance if
+  // that identity has ONLY ever been heard via one bridge and NEVER over
+  // local RF (within RF_AWARENESS_WINDOW_SECS-ish confidence -- see .cpp),
+  // else NULL (unknown or RF-reachable -- always the safe default). Used by
+  // trySendViaBridge() to redirect DIRECT-route sends whose true next hop
+  // is provably bridge-only, without guessing from how the *triggering*
+  // packet happened to arrive (see planning/ip-bridge-mesh-safety.md gap #4).
+  void* findBridgeOnlyNextHop(const uint8_t* hash, uint8_t hash_size) const;
 #endif
 #ifdef WITH_IP_BRIDGE
   bool hasLiveRfNeighbour() const;

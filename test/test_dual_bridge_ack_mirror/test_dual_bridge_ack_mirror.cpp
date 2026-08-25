@@ -140,12 +140,41 @@ struct FakeMeshDeps {
 // Mirrors examples/simple_repeater/MyMesh.cpp's CURRENT onRecvPacket() /
 // trySendViaBridge() / logTx() trio exactly, for a trifecta node running
 // both WITH_ESPNOW_BRIDGE and WITH_IP_BRIDGE -- see MyMesh.cpp:479-626.
+// Max age for recv_pkt_source_bridge -- mirrors MyMesh.h's
+// RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS.
+static const unsigned long RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS = 1000;
+
 class TestTrifectaMesh : public FakeMeshDeps, public Mesh {
 public:
   void* recv_pkt_source_bridge = nullptr;
+  unsigned long recv_pkt_source_bridge_set_at = 0;
   int bridge_pkt_src = 0;   // 0 = logTx (mirror-on-TX), matches R73's confirmed live 'bridge.source=logTx'
   FakeBridge espnow_bridge;
   FakeBridge ip_bridge;
+
+  // Minimal mirror of MyMesh's neighbours[]/bridge_neighbours[] tables
+  // (examples/simple_repeater/MyMesh.h) -- only what findBridgeOnlyNextHop()
+  // needs: an identity hash and when it was last heard, split RF vs bridge.
+  static const int MAX_TABLE = 4;
+  struct { Identity id; unsigned long heard_timestamp; } rf_neighbours[MAX_TABLE] = {};
+  struct { Identity id; unsigned long heard_timestamp; void* bridge; } bridge_neighbours[MAX_TABLE] = {};
+
+  void putRfNeighbourHash(uint8_t hash_byte) {
+    Identity id;
+    memset(id.pub_key, 0, PUB_KEY_SIZE);
+    id.pub_key[0] = hash_byte;
+    rf_neighbours[0].id = id;
+    rf_neighbours[0].heard_timestamp = 1000;
+  }
+
+  void putBridgeNeighbourHash(uint8_t hash_byte, void* via_bridge) {
+    Identity id;
+    memset(id.pub_key, 0, PUB_KEY_SIZE);
+    id.pub_key[0] = hash_byte;
+    bridge_neighbours[0].id = id;
+    bridge_neighbours[0].heard_timestamp = 1000;
+    bridge_neighbours[0].bridge = via_bridge;
+  }
 
   explicit TestTrifectaMesh(uint8_t hash_byte)
     : FakeMeshDeps(), Mesh(radio, clock, rng, rtc, mgr, tables) {
@@ -156,8 +185,9 @@ public:
   bool allowPacketForward(const Packet*) override { return true; }
   uint32_t getDirectRetransmitDelay(const Packet*) override { return 0; }
 
-  DispatcherAction onRecvPacket(Packet* pkt) override {   // MyMesh.cpp:572-591
+  DispatcherAction onRecvPacket(Packet* pkt) override {   // MyMesh.cpp:708-726
     recv_pkt_source_bridge = pkt->_src_bridge;
+    recv_pkt_source_bridge_set_at = clock.getMillis();
     return Mesh::onRecvPacket(pkt);
   }
 
@@ -168,28 +198,55 @@ public:
     }
   }
 
+  // Mirrors MyMesh::findBridgeOnlyNextHop() (MyMesh.cpp) exactly in shape:
+  // RF sighting (ever) disqualifies; a fresh bridge-only sighting wins.
+  void* findBridgeOnlyNextHop(const uint8_t* hash, uint8_t hash_size) const {
+    for (int i = 0; i < MAX_TABLE; i++) {
+      if (rf_neighbours[i].heard_timestamp > 0 && rf_neighbours[i].id.isHashMatch(hash, hash_size)) {
+        return nullptr;
+      }
+    }
+    for (int i = 0; i < MAX_TABLE; i++) {
+      if (bridge_neighbours[i].heard_timestamp > 0 && bridge_neighbours[i].id.isHashMatch(hash, hash_size)) {
+        return bridge_neighbours[i].bridge;
+      }
+    }
+    return nullptr;
+  }
+
 protected:
-  bool trySendViaBridge(Packet* packet) override {   // MyMesh.cpp:594-626, CURRENT (route-type-gated) version
-    void* bridge = recv_pkt_source_bridge;
+  bool trySendViaBridge(Packet* packet) override {   // MyMesh.cpp:729-820, CURRENT version
+    void* bridge = (clock.getMillis() - recv_pkt_source_bridge_set_at < RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS)
+                   ? recv_pkt_source_bridge : nullptr;
     recv_pkt_source_bridge = nullptr;
-    if (bridge == nullptr) return false;
 
     if (packet->isRouteDirect()) {
-      // MyMesh.cpp's current gate (see planning/ip-bridge-mesh-safety.md
-      // gap #4): a freshly-composed zero-hop reply, for any payload type
-      // that can never reach here as Mesh::routeDirectRecvAcks()'s
-      // decremented relay-in-transit shape (ACK/MULTIPART), can safely be
-      // answered bridge-only -- path_len==0 unambiguously names the peer
-      // we just heard from as the destination.
-      if (packet->getPathHashCount() == 0 &&
+      // Exception 1: freshly-composed zero-hop reply, non-ACK/MULTIPART --
+      // see planning/ip-bridge-mesh-safety.md gap #4.
+      if (bridge != nullptr && packet->getPathHashCount() == 0 &&
           packet->getPayloadType() != PAYLOAD_TYPE_ACK &&
           packet->getPayloadType() != PAYLOAD_TYPE_MULTIPART) {
         ((AbstractBridge*)bridge)->sendPacket(packet);
         releasePacket(packet);
         return true;
       }
+
+      // Exception 2: real path with hops remaining, next hop is a known
+      // bridge-only neighbour (looked up fresh, not from how the
+      // triggering packet arrived) -- safe for ACK/MULTIPART too.
+      if (packet->getPathHashCount() > 0) {
+        void* target_bridge = findBridgeOnlyNextHop(packet->path, packet->getPathHashSize());
+        if (target_bridge != nullptr) {
+          ((AbstractBridge*)target_bridge)->sendPacket(packet);
+          releasePacket(packet);
+          return true;
+        }
+      }
+
       return false;   // has its own path[] to follow -- fall through to normal local TX (-> logTx mirror)
     }
+
+    if (bridge == nullptr) return false;
 
     ((AbstractBridge*)bridge)->sendPacket(packet);
     releasePacket(packet);
@@ -237,6 +294,23 @@ Packet makeDirectAckWithOneMoreHop(uint8_t self_hash, uint8_t next_hop_hash) {
   uint32_t ack_crc = 0xDEADBEEF;
   memcpy(p.payload, &ack_crc, 4);
   p.payload_len = 4;
+  return p;
+}
+
+// A DIRECT packet with one real hop remaining -- the shape of a
+// CLI-over-chat reply (onPeerDataRecv(), PAYLOAD_TYPE_TXT_MSG) sent via
+// sendDirect(reply, client->out_path,...) where out_path is one real hop
+// long (a genuine intermediate repeater, not a fake/local-delivery marker).
+// This is the actual live symptom this fix targets: exception 1 doesn't
+// apply here (path_hash_count is 1, not 0).
+Packet* makeDirectPacketWithOneHop(uint8_t payload_type, uint8_t next_hop_hash) {
+  Packet* p = new Packet();
+  p->header = ROUTE_TYPE_DIRECT | (payload_type << PH_TYPE_SHIFT);
+  p->path[0] = next_hop_hash;
+  p->setPathHashSizeAndCount(1, 1);
+  uint8_t body[4] = {9, 9, 9, 9};
+  memcpy(p->payload, body, sizeof(body));
+  p->payload_len = sizeof(body);
   return p;
 }
 
@@ -360,6 +434,49 @@ TEST(DualBridgeAckMirror, FloodReplyStillRedirectsBackOutOriginatingBridge) {
   EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
 }
 
+// Staleness fix (planning/ip-bridge-mesh-safety.md gap #4, found live
+// 2026-08-24): recv_pkt_source_bridge is "consume-once" but was previously
+// unbounded in age -- if nothing gets sent for a while after a
+// bridge-sourced receive (bridge heartbeat pongs don't go through
+// Mesh::sendPacket() at all, so this is plausible), a stale flag could
+// misfire on some later, completely unrelated send. Reproduces the actual
+// observed failure: a broadcast FLOOD send with NO relation to any prior
+// receive must reach both bridges (today's safe default), not get
+// incorrectly redirected bridge-only just because a receive happened long
+// ago and was never "consumed" by an intervening send.
+TEST(DualBridgeAckMirror, StaleRecvPktSourceBridgeDoesNotMisrouteUnrelatedSend) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
+  repeater.recv_pkt_source_bridge_set_at = 0;          // "received" at t=0
+  repeater.clock._now = RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS + 1;   // long after, nothing sent in between
+
+  repeater.sendPacket(makeFloodReply(), 0, 0);
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 0)
+      << "a stale recv_pkt_source_bridge must not redirect an unrelated later send";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0)
+      << "trySendViaBridge declining just means 'fall through to normal "
+         "local TX', which this synthetic FLOOD packet doesn't actually "
+         "drive through a full send cycle -- the point here is only that "
+         "it did NOT get redirected";
+}
+
+// Regression guard: a FRESH recv_pkt_source_bridge (well within the age
+// bound) must still redirect exactly as before -- the fix narrows when the
+// flag is trusted, it doesn't disable the mechanism.
+TEST(DualBridgeAckMirror, FreshRecvPktSourceBridgeStillRedirects) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.recv_pkt_source_bridge = &repeater.ip_bridge;
+  repeater.recv_pkt_source_bridge_set_at = 0;
+  repeater.clock._now = RECV_PKT_SOURCE_BRIDGE_MAX_AGE_MS - 1;   // just under the bound
+
+  repeater.sendPacket(makeFloodReply(), 0, 0);
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "a fresh flag (well within the age bound) must still redirect normally";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+}
+
 // The fix under test (planning/ip-bridge-mesh-safety.md gap #4): a
 // zero-hop DIRECT admin/CLI reply, generated in response to a request that
 // arrived via the bridge, must go bridge-only -- the observed live symptom
@@ -401,6 +518,76 @@ TEST(DualBridgeAckMirror, ZeroHopDirectAckFromBridgeStillFallsThrough) {
   EXPECT_EQ(repeater.ip_bridge.send_calls, 0)
       << "ACK must never be bridge-redirected by the zero-hop DIRECT fix -- "
          "only real local TX (+ logTx's separate mirror) is safe for it";
+}
+
+// The actual live symptom this fix targets: R73/Ra2-style topology, a
+// CLI-over-chat reply (TXT_MSG) with ONE real hop remaining whose next hop
+// (the intermediate repeater) has only ever been heard over the IP bridge,
+// never over local RF -- observed live via BRIDGE_DEBUG capture 2026-08-24
+// (`trySendViaBridge: DIRECT-route packet (path_hops=1, type=2), NOT
+// redirecting`, followed by a real LoRa TX every time). Must now redirect
+// bridge-only instead of needlessly keying local RF.
+TEST(DualBridgeAckMirror, DirectTxtMsgToKnownBridgeOnlyNextHopRedirects) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);   // 0x99 heard only via IP bridge, never RF
+
+  repeater.sendPacket(makeDirectPacketWithOneHop(PAYLOAD_TYPE_TXT_MSG, 0x99), 0, 0);
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "next hop is a known bridge-only neighbour -- must redirect there directly";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+}
+
+// Regression guard: if the next hop's identity is unknown to both tables
+// (never populated in this test), the new lookup must decline and preserve
+// today's safe default -- normal local TX + logTx()'s mirror, exactly like
+// DirectAckWithRemainingHopFallsThroughAndReachesEspNowBridge above.
+TEST(DualBridgeAckMirror, DirectTxtMsgToUnknownNextHopFallsThroughAndMirrors) {
+  TestTrifectaMesh repeater(0x73);
+  // no neighbour tables populated -- next hop identity is unknown
+
+  repeater.sendPacket(makeDirectPacketWithOneHop(PAYLOAD_TYPE_TXT_MSG, 0x99), 0, 0);
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "unknown next hop must fall through to real local TX + logTx's mirror";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1);
+}
+
+// Safety guard: if the next hop has EVER been heard over real RF (even if
+// it also happens to have a bridge_neighbours entry -- a node can be both
+// RF- and bridge-reachable), local delivery must not be skipped.
+TEST(DualBridgeAckMirror, DirectTxtMsgToRfHeardNextHopFallsThroughAndMirrors) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putRfNeighbourHash(0x99);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);   // also bridge-heard -- RF must still win
+
+  repeater.sendPacket(makeDirectPacketWithOneHop(PAYLOAD_TYPE_TXT_MSG, 0x99), 0, 0);
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "an RF-heard next hop must never be skipped in favor of a bridge redirect";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1);
+}
+
+// The new lookup is identity-based, not payload-type-based, so it can safely
+// extend to ACK/MULTIPART too (unlike exception 1) -- an ACK relay-in-transit
+// packet whose next hop is a known bridge-only neighbour should also redirect.
+TEST(DualBridgeAckMirror, DirectAckToKnownBridgeOnlyNextHopRedirects) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.ip_bridge);
+
+  Packet ack = makeDirectAckWithOneMoreHop(0x73, 0x99);
+  ack._src_bridge = &repeater.ip_bridge;
+
+  repeater.begin();
+  repeater.recv(&ack);
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "identity-based lookup is safe for ACK too -- the redirect decision "
+         "never depends on distinguishing fresh-reply from relay-in-transit";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
 }
 
 int main(int argc, char** argv) {
