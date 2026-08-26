@@ -23,17 +23,29 @@ static uint8_t last_rx_len = 0;
 // so once a valid frame's been heard from it, sends switch from broadcast to
 // unicast straight to its MAC. Falls back to broadcast until a peer's known.
 //
-// Retries are bounded by Dispatcher's own outbound_expiry (~150ms) -- it
-// gives up on the whole packet if isSendComplete() doesn't go true in time.
-// 4 attempts fits comfortably within that budget based on observed
-// OnDataSent() failure timing.
+// Retries are bounded by Dispatcher's own outbound_expiry (see
+// getEstAirtimeFor()) -- it gives up on the whole packet if isSendComplete()
+// doesn't go true in time. Live-measured (2026-08-26, real hardware, real
+// failures against a paired repeater): a failed attempt's own OnDataSent()
+// callback lands in ~16-21ms, consistently -- not the old, unreconciled
+// "up to 13s" claim (see getEstAirtimeFor()). At ~21ms/attempt worst case,
+// 12 attempts costs roughly 12*21 + 11*TX_RETRY_DELAY_MS =~ 362ms worst
+// case, within budget below. Bumped 4 -> 6 -> 12 (a plain user-facing win:
+// retries are cheap and fast, so a lot more of them beats a visible timeout
+// error on a marginal link) -- observed live that some exchanges only
+// succeeded on attempt 3, and 4/4 failures were common enough to be the
+// primary complaint driving this whole investigation. The real root cause
+// looks like antenna/RF margin between this board and its paired repeater
+// (confirmed live: failures dropped sharply at close range), not something
+// fixable here -- this is a pragmatic mitigation for marginal links, not a
+// fix for the underlying link budget.
 static uint8_t s_peer_mac[6] = {0};
 static bool s_peer_known = false;
 
 static uint8_t s_last_tx_buffer[MAX_ESPNOW_PACKET_SIZE];
 static size_t s_last_tx_len = 0;
 static uint8_t s_tx_attempt = 0;
-static const uint8_t MAX_TX_ATTEMPTS = 4;       // 1 initial + 3 retries
+static const uint8_t MAX_TX_ATTEMPTS = 12;      // 1 initial + 11 retries
 static const uint32_t TX_RETRY_DELAY_MS = 10;
 static bool s_retry_pending = false;
 static unsigned long s_retry_at = 0;
@@ -44,6 +56,16 @@ static unsigned long s_retry_at = 0;
 // inside its own callbacks.
 static uint8_t s_pending_learn_mac[6] = {0};
 static volatile bool s_pending_learn = false;
+
+// Timing instrumentation for OnDataSent() latency -- added to actually
+// measure this instead of relying on old, unreconciled numbers in
+// getEstAirtimeFor()'s comment (one debugging session claimed up to 13s
+// stalls, the very next day's diagnostics showed 8-43ms; never resolved).
+// s_attempt_started_at resets each retry; s_send_started_at stays fixed
+// across all attempts of one packet, so both per-attempt and cumulative
+// latency are visible against Dispatcher's ~150ms outbound_expiry budget.
+static unsigned long s_send_started_at = 0;
+static unsigned long s_attempt_started_at = 0;
 
 // No compile-time default -- 0/empty means "not configured yet". Only
 // setBridgeParams() (driven by persisted CLI config) ever sets these to
@@ -77,7 +99,9 @@ static void xorCrypt(uint8_t* data, size_t len) {
 
 // callback when data is sent
 static void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  ESPNOW_DEBUG_PRINTLN("Send Status: %d", (int)status);
+  unsigned long now = millis();
+  ESPNOW_DEBUG_PRINTLN("Send Status: %d (attempt %d, +%lums this attempt, +%lums total)",
+                       (int)status, (int)s_tx_attempt, now - s_attempt_started_at, now - s_send_started_at);
   if (status != ESP_NOW_SEND_SUCCESS && s_tx_attempt < MAX_TX_ATTEMPTS) {
     // Never call ESP-NOW APIs from inside this callback -- it runs on the
     // WiFi driver's own task, not the main loop. Just flag it; loop() (main
@@ -317,6 +341,8 @@ bool ESPNowBridgeRadio::startSendRaw(const uint8_t* bytes, int len) {
   is_send_complete = false;
   s_retry_pending = false;
   s_tx_attempt = 1;
+  s_send_started_at = millis();
+  s_attempt_started_at = s_send_started_at;
 
   // Build directly into the static retry buffer -- loop() resends straight
   // from here if this attempt's send_cb() reports failure.
@@ -392,18 +418,21 @@ uint32_t ESPNowBridgeRadio::getEstAirtimeFor(int len_bytes) {
   // feeds Dispatcher::checkSend()'s outbound_expiry (getEstAirtimeFor()*3/2)
   // -- the deadline for the ASYNC esp_now send-completion callback
   // (OnDataSent(), fired from the WiFi/ESP-NOW driver's own task) to set
-  // is_send_complete. That callback's real-world latency has nothing to do
-  // with actual airtime on this radio -- it shares the radio with WiFi STA
-  // and, on this board, DTLS/IpBridge traffic -- and was measured directly
-  // (2026-08-16 debugging session) anywhere from ~1ms up to ~13 SECONDS.
-  // The previous value of 4 (-> 6ms expiry) meant the callback almost never
-  // arrived in time: Dispatcher gave up and called logTxFail() before the
-  // real completion ever landed, silently discarding the packet -- so
-  // logTx() (which is what feeds bridge.sendPacket(), the IpBridge hook)
-  // essentially never fired for any locally-sent packet. 100ms (-> 150ms
-  // expiry) covers the overwhelming majority of observed completions
-  // without stalling Dispatcher on a genuinely stuck send for too long.
-  return 100;
+  // is_send_complete, covering every attempt in MAX_TX_ATTEMPTS's retry
+  // loop above, not just the first. An earlier value here (4, -> 6ms
+  // expiry) meant the callback almost never arrived in time at all --
+  // Dispatcher gave up before the real completion landed, so logTx() (what
+  // feeds bridge.sendPacket(), the IpBridge hook) essentially never fired
+  // for any locally-sent packet. A later value (100, -> 150ms) was based on
+  // a debugging session that claimed up to 13-SECOND completions -- that
+  // claim was never reconciled with same-day live measurements showing
+  // 8-43ms, and turned out to be unfounded once actually checked (see
+  // MAX_TX_ATTEMPTS's comment above). 290 (-> 435ms expiry) is sized for
+  // MAX_TX_ATTEMPTS=12's real worst case (~362ms, live-measured math above),
+  // with margin -- covers every retry attempt actually completing before
+  // Dispatcher gives up, at the cost of a genuinely stuck send taking longer
+  // to time out.
+  return 290;
 }
 
 void ESPNowBridgeRadio::loop() {
@@ -427,6 +456,7 @@ void ESPNowBridgeRadio::loop() {
   if (s_retry_pending && (int32_t)(millis() - s_retry_at) >= 0) {
     s_retry_pending = false;
     s_tx_attempt++;
+    s_attempt_started_at = millis();
     const uint8_t* dest = s_peer_known ? s_peer_mac : broadcastAddress;
     esp_err_t result = esp_now_send(dest, s_last_tx_buffer, s_last_tx_len);
     if (result != ESP_OK) {

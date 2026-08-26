@@ -108,6 +108,16 @@ private:
   bool _send_in_flight = false;
   bool _send_awaiting_retry = false;
   unsigned long _send_retry_at = 0;
+  unsigned long _send_issued_at = 0;  // millis() at issueSend() -- timing instrumentation, see onSendResult()
+
+  // millis() of the last completed send (success or final failure) or
+  // received frame -- see shouldDeferHeartbeat().
+  unsigned long _last_activity_at = 0;
+  // Observed live: a companion's reply, sent within ~20ms of receiving
+  // something from this bridge, can arrive right as this bridge itself was
+  // just active -- covers that whole round-trip window, not just "literally
+  // mid-send right now".
+  static const uint32_t ACTIVITY_GRACE_MS = 50;
   static const uint8_t PEER_IDX_BROADCAST = 0xFF;  // sentinel: no known peers yet, use broadcast
 
   /**
@@ -230,6 +240,23 @@ public:
    * @param packet The mesh packet to transmit
    */
   void sendPacket(mesh::Packet *packet) override;
+
+  /**
+   * True while a send is in flight, or briefly after any send/receive
+   * activity (see ACTIVITY_GRACE_MS) -- covers not just "literally mid-send"
+   * but the short window right after, where a peer's own reply is likely
+   * still in flight back to us. Lets a dual-bridge board (WITH_IP_BRIDGE
+   * alongside this) hold off IpBridge's heartbeat ping for a tick rather
+   * than risk it competing with an inbound ESP-NOW frame's MAC-ACK timing
+   * for the radio -- see IpBridge::setDeferHeartbeat(). Confirmed live: a
+   * companion's reply repeatedly failed 4/4 retries specifically when this
+   * bridge's own heartbeat ping landed in the same window as the companion's
+   * round trip.
+   */
+  bool shouldDeferHeartbeat() const {
+    return _active_queue_idx >= 0 || _send_in_flight || _send_awaiting_retry ||
+           (millis() - _last_activity_at < ACTIVITY_GRACE_MS);
+  }
 };
 
 #endif

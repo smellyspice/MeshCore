@@ -5,7 +5,7 @@
 #include "TxtDataHelpers.h"
 #include <RTClib.h>
 
-#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
+#if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE) || defined(WITH_ESPNOW_BRIDGE))
   #include <WiFi.h>
 #endif
 
@@ -975,7 +975,22 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
 #endif
 #if defined(WITH_ESPNOW_BRIDGE) || defined(ESPNOW_BRIDGE_RADIO)
   } else if (memcmp(config, "bridge.channel", 14) == 0) {
+#if defined(ESP32)
+    // WiFi.channel() reads the radio's actual live channel -- ESP-NOW and
+    // WiFi STA share one physical radio, so if this board also runs a WiFi
+    // STA connection (IP bridge, or a WIFI_SSID companion build) for any
+    // reason, that connection's channel wins regardless of bridge_channel.
+    // Surfacing both makes a live/configured mismatch visible without
+    // needing to check the AP's admin page.
+    uint8_t live = WiFi.channel();
+    if (live != 0 && live != _prefs->bridge_channel) {
+      sprintf(reply, "> %d (live radio channel: %d -- MISMATCH)", (uint32_t)_prefs->bridge_channel, (uint32_t)live);
+    } else {
+      sprintf(reply, "> %d (live radio channel: %d)", (uint32_t)_prefs->bridge_channel, (uint32_t)live);
+    }
+#else
     sprintf(reply, "> %d", (uint32_t)_prefs->bridge_channel);
+#endif
   } else if (memcmp(config, "bridge.secret", 13) == 0) {
     sprintf(reply, "> %s", _prefs->bridge_secret);
 #endif

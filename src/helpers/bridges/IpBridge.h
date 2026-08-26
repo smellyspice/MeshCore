@@ -52,6 +52,23 @@ public:
   void sendPacket(mesh::Packet *packet) override;
   void onPacketReceived(mesh::Packet *packet) override;
 
+  // Dual-bridge boards only (WITH_ESPNOW_BRIDGE alongside WITH_IP_BRIDGE):
+  // MyMesh calls this every loop() tick, just before ip_bridge.loop(), with
+  // whether ESPNowBridge currently has a send in flight. Both bridges share
+  // one physical WiFi radio, and the heartbeat ping fires on its own
+  // independent 15s timer, completely decoupled from any specific packet --
+  // unlike logTx()'s same-packet dual-bridge mirror (already staggered),
+  // there's no single packet to stagger against here. Skipping the ping for
+  // one tick when ESP-NOW is mid-transaction is cheap (checkHeartbeat() just
+  // tries again next tick, at most a few ms later) and avoids a real,
+  // observed collision: an inbound ESP-NOW unicast frame needs its MAC-layer
+  // ACK sent within a very tight hardware timing window, and a concurrent
+  // heartbeat TX competing for the same radio can make that ACK late enough
+  // for the sender to see a failed send, even though this repeater did
+  // receive the frame. Does not affect dead-link timeout detection, which
+  // stays live every tick regardless.
+  void setDeferHeartbeat(bool defer) { _defer_heartbeat = defer; }
+
   // Lightweight live-state query for 'get ip.status' -- doesn't need
   // BRIDGE_DEBUG=1 the way the full handshake/heartbeat tracing does. Writes
   // a short human-readable summary into 'reply' (caller-owned buffer, same
@@ -84,6 +101,21 @@ private:
   // CLI/mesh dispatch/LEDs -- confirmed live against an unreachable peer.
   unsigned long _next_handshake_poll_at = 0;
 
+  // millis() when the current HANDSHAKING attempt started -- set at every
+  // entry into that state (startConnect(), pollListening()'s accept, and
+  // the same-source-port CLIENT_RECONNECT case in pollConnectedIO()). Bounds
+  // how long a handshake is allowed to sit unresolved: WANT_READ/WANT_WRITE/
+  // TIMEOUT from mbedtls_ssl_handshake() just means "keep polling, mbedTLS's
+  // own DTLS retransmit is handling it" -- correct behavior for a live peer,
+  // but with no outer bound at all, a peer that disappears mid-handshake
+  // (network switch, IP change, dead) leaves this stuck in HANDSHAKING
+  // forever: the server's listening socket won't accept a new connection
+  // until this one resolves, and nothing ever made it resolve, and observed
+  // live requiring a manual reboot to recover. See checkHeartbeat() for
+  // the equivalent watchdog once actually CONNECTED -- this covers the gap
+  // before that point.
+  unsigned long _handshake_started_at = 0;
+
   // Last known-good IP for the client role, so most reconnects skip DNS.
   char _resolved_ip[16] = {0};
   uint8_t _consecutive_connect_failures = 0;
@@ -97,6 +129,7 @@ private:
   // check rather than a per-ping miss counter.
   unsigned long _last_rx_at = 0;
   unsigned long _next_ping_at = 0;
+  bool _defer_heartbeat = false;  // see setDeferHeartbeat()
 
   struct Timer {
     unsigned long int_at = 0;

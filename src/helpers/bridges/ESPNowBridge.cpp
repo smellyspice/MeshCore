@@ -185,6 +185,7 @@ void ESPNowBridge::onDataRecv(const uint8_t *mac, const uint8_t *data, int32_t l
   // peer table (not a security boundary -- MAC spoofing is trivial on
   // ESP-NOW -- just avoids wasting a table slot on noise).
   _instance->learnPeer(mac);
+  _instance->_last_activity_at = millis();
 
   BRIDGE_DEBUG_PRINTLN("RX, payload_len=%d\n", payloadLen);
 
@@ -205,18 +206,22 @@ void ESPNowBridge::onDataSent(const uint8_t *mac_addr, esp_now_send_status_t sta
 
 void ESPNowBridge::onSendResult(bool ok) {
   _send_in_flight = false;
+  _last_activity_at = millis();
   if (_active_queue_idx < 0) return;  // stray/late callback after a reset -- nothing to do
 
+  unsigned long dt = millis() - _send_issued_at;
   if (ok) {
-    BRIDGE_DEBUG_PRINTLN("TX ok, peer_idx=%d attempt=%d\n", (int)_active_peer_idx, (int)_send_attempt);
+    BRIDGE_DEBUG_PRINTLN("TX ok, peer_idx=%d attempt=%d, +%lums since issueSend()\n",
+                         (int)_active_peer_idx, (int)_send_attempt, dt);
     advanceToNextPeerOrFinish();
   } else if (_send_attempt < MAX_SEND_ATTEMPTS) {
-    BRIDGE_DEBUG_PRINTLN("TX failed, will retry (attempt %d of %d)\n", (int)_send_attempt,
-                         (int)MAX_SEND_ATTEMPTS);
+    BRIDGE_DEBUG_PRINTLN("TX failed, will retry (attempt %d of %d), +%lums since issueSend()\n",
+                         (int)_send_attempt, (int)MAX_SEND_ATTEMPTS, dt);
     _send_awaiting_retry = true;
     _send_retry_at = millis() + SEND_RETRY_DELAY_MS;
   } else {
-    BRIDGE_DEBUG_PRINTLN("TX failed after %d attempts, giving up on this peer\n", (int)_send_attempt);
+    BRIDGE_DEBUG_PRINTLN("TX failed after %d attempts, giving up on this peer, +%lums since issueSend()\n",
+                         (int)_send_attempt, dt);
     advanceToNextPeerOrFinish();
   }
 }
@@ -250,6 +255,7 @@ void ESPNowBridge::issueSend() {
 
   _send_attempt++;
   _send_in_flight = true;
+  _send_issued_at = millis();
   esp_err_t result = esp_now_send(dest, q.buffer, q.len);
   if (result != ESP_OK) {
     // Couldn't even hand this off to the driver -- treat like an immediate

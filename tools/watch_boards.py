@@ -19,12 +19,22 @@ dropped and reported, without killing the other streams.
 
 Companion_radio boards (no text CLI reply -- they speak a binary framed
 protocol on serial instead, see tools/send_companion_msg.py) are detected
-and skipped rather than connected to.
+and skipped by default, since opening that port fights over it with
+anything actually using the board (phone app, send_companion_msg.py).
+Press 'c' at any time to turn that off and watch them anyway, read-only --
+useful because MESH_DEBUG/BRIDGE_DEBUG prints share the same serial port
+as the binary protocol on companion firmware, so real debug lines are in
+there too, just interleaved with undecodable protocol bytes (shown as
+garbage/replacement characters). Companion connections are never written
+to by the 'n'/'b' hotkeys, toggle on or off.
 
 While running: press 'n' to send 'neighbors.all' to every connected
 repeater at once (each reply streams in through its own line as usual,
-just like typing the command by hand on each board one at a time), or 'q'
-to quit (same as Ctrl+C).
+just like typing the command by hand on each board one at a time), 'b'
+to dump IP bridge state ('get wifi.status' + 'get ip.status' + 'get
+bridge.channel') from every connected repeater, 'c' to toggle watching
+companion_radio boards (skipped by default -- see below), or 'q' to quit
+(same as Ctrl+C).
 
 Each board's [label] keeps its own fixed color so you can tell streams
 apart; message text is separately colored by what kind of event it is --
@@ -171,7 +181,7 @@ def annotate_types(text):
 # into an aligned, labeled row whenever this exact shape is seen, regardless
 # of whether it was triggered by the 'n' hotkey or typed by hand.
 NEIGHBOR_ENTRY_RE = re.compile(r"^([0-9A-Fa-f]{8}):(-?\d+):(-?\d+):(RF|IP|ESPNOW|RS232|\?)$")
-COMMAND_ECHO_TEXTS = {"neighbors.all", "neighbors"}
+COMMAND_ECHO_TEXTS = {"neighbors.all", "neighbors", "get wifi.status", "get ip.status", "get bridge.channel"}
 
 
 def prettify_or_none(text):
@@ -206,9 +216,11 @@ RESET = "\033[0m"
 
 print_lock = threading.Lock()
 watched = {}  # port device -> thread
-active_serials = {}  # port device -> open Serial handle, for text-CLI boards only, used by the 'n' hotkey
-skipped_ports = set()  # ports identified as companion boards -- don't retry every rescan
+active_serials = {}  # port device -> open Serial handle, for text-CLI boards only, used by the 'n'/'b' hotkeys
+skipped_ports = set()  # ports identified as companion boards -- don't retry every rescan (unless include_companions)
 stop_flag = threading.Event()
+include_companions = False  # toggled at runtime via the 'c' hotkey -- see keypress_listener()
+companion_stop_events = {}  # port device -> Event, set by toggle_companions() to drop an open passthrough
 
 
 def looks_like_board(port, include_all):
@@ -257,29 +269,52 @@ def watch_port(port_device, color):
 
     time.sleep(0.3)
     name = probe_name(ser)
-    if name is None:
+    is_companion = name is None
+    if is_companion and not include_companions:
         # No text-CLI reply -> most likely a companion_radio board, which
         # speaks a binary framed protocol on serial instead (see
         # tools/send_companion_msg.py) -- not what this tool is for, and
         # decoding it fights over the port with anything actually using
-        # that board (phone app, send_companion_msg.py). Skip it.
+        # that board (phone app, send_companion_msg.py). Skip it, unless
+        # the 'c' hotkey has turned companion-watching on.
         with print_lock:
-            print(f"{color}[{label}]{RESET} looks like a companion board (no text CLI reply) -- skipping")
+            print(f"{color}[{label}]{RESET} looks like a companion board (no text CLI reply) -- skipping (press 'c' to watch it anyway)")
         ser.close()
         skipped_ports.add(port_device)
         watched.pop(port_device, None)
         return
 
-    label = f"{label}/{name}"
-    active_serials[port_device] = ser
-    with print_lock:
-        print(f"{color}[{label}]{RESET} connected")
+    companion_stop = None
+    if is_companion:
+        label = f"{label}/companion?"
+        # Deliberately NOT added to active_serials -- companion boards speak
+        # a live binary framed protocol on this same port (to the phone app
+        # or send_companion_msg.py), so the 'n'/'b' hotkeys, which write text
+        # commands to every active_serials entry, must never touch it. This
+        # connection is read-only: debug prints (MESH_DEBUG/BRIDGE_DEBUG)
+        # share the same Serial as that binary protocol on companion
+        # firmware, so they still show up here -- interleaved with
+        # undecodable binary bytes from actual protocol traffic, which will
+        # render as garbage/replacement characters rather than clean lines.
+        # companion_stop is this connection's own drop signal -- toggling
+        # companion-watching back off (the 'c' hotkey) sets it so an
+        # already-open passthrough actually closes, instead of only
+        # affecting boards detected afterward.
+        companion_stop = threading.Event()
+        companion_stop_events[port_device] = companion_stop
+        with print_lock:
+            print(f"{color}[{label}]{RESET} connected (read-only passthrough -- binary protocol bytes will show as garbage)")
+    else:
+        label = f"{label}/{name}"
+        active_serials[port_device] = ser
+        with print_lock:
+            print(f"{color}[{label}]{RESET} connected")
 
     buf = b""
     consecutive_errors = 0
     last_raw_hex = None  # most recent 'RAW:' hex dump, paired with the RX summary line right after it
     try:
-        while not stop_flag.is_set():
+        while not stop_flag.is_set() and not (companion_stop and companion_stop.is_set()):
             try:
                 chunk = ser.read(ser.in_waiting or 1)
             except (serial.SerialException, OSError):
@@ -328,12 +363,16 @@ def watch_port(port_device, color):
         with print_lock:
             print(f"{color}[{label}]{RESET} disconnected: {e}")
     finally:
+        if companion_stop and companion_stop.is_set():
+            with print_lock:
+                print(f"{color}[{label}]{RESET} companion watching turned off -- closing")
         try:
             ser.close()
         except Exception:
             pass
         watched.pop(port_device, None)
         active_serials.pop(port_device, None)
+        companion_stop_events.pop(port_device, None)
 
 
 def dump_neighbors_all():
@@ -348,9 +387,56 @@ def dump_neighbors_all():
                 print(f"  {port_device}: failed to send -- {e}")
 
 
+def dump_bridge_status():
+    """'get wifi.status' + 'get ip.status' + 'get bridge.channel' from every
+    connected board -- CLI config reads WITH_IP_BRIDGE/WITH_ESPNOW_BRIDGE
+    builds already answer by hand, just fired at every board at once.
+    'get bridge.channel' now echoes both the configured value and the
+    radio's actual live WiFi channel (they share one physical radio, so a
+    WiFi STA connection elsewhere on the board silently wins) -- a
+    mismatch there is a real, previously-invisible cause of dropped
+    ESP-NOW traffic. Boards without a given bridge compiled in reply with
+    an error line (or nothing, for a repeater-only build with no
+    CommonCLI 'get' handler at all for it), which is itself useful
+    diagnostic signal, so nothing is filtered out here."""
+    boards = list(active_serials.items())
+    with print_lock:
+        print(f"\n\033[1m== bridge status -- {len(boards)} board(s) =={RESET}")
+    for port_device, ser in boards:
+        try:
+            ser.write(b"get wifi.status\r\n")
+            ser.write(b"get ip.status\r\n")
+            ser.write(b"get bridge.channel\r\n")
+        except Exception as e:
+            with print_lock:
+                print(f"  {port_device}: failed to send -- {e}")
+
+
+def toggle_companions():
+    global include_companions
+    include_companions = not include_companions
+    with print_lock:
+        state = "ON -- will connect and stream raw output (read-only)" if include_companions else "OFF -- dropping any open companion connections"
+        print(f"\n\033[1m== companion watching: {state} =={RESET}")
+    if include_companions:
+        # Ports already parked in skipped_ports (from before the toggle)
+        # would otherwise sit there until unplugged/replugged -- clear it so
+        # the next rescan (within args.rescan seconds) picks them back up.
+        skipped_ports.clear()
+    else:
+        # Turning off must also close any companion connection already open
+        # -- otherwise it just keeps streaming (garbage bytes included) until
+        # it disconnects on its own, since watch_port()'s loop only checks
+        # this per-connection event, it doesn't poll include_companions.
+        for ev in list(companion_stop_events.values()):
+            ev.set()
+
+
 def keypress_listener():
     """Reads single keypresses without needing Enter -- 'n' triggers
-    dump_neighbors_all(), 'q' stops the same way Ctrl+C does. cbreak mode
+    dump_neighbors_all(), 'b' triggers dump_bridge_status(), 'c' toggles
+    watching companion_radio boards (skipped by default -- see
+    toggle_companions()), 'q' stops the same way Ctrl+C does. cbreak mode
     (not raw) keeps Ctrl+C's normal signal behavior working."""
     if not sys.stdin.isatty():
         return
@@ -364,6 +450,10 @@ def keypress_listener():
                 ch = sys.stdin.read(1)
                 if ch == "n":
                     dump_neighbors_all()
+                elif ch == "b":
+                    dump_bridge_status()
+                elif ch == "c":
+                    toggle_companions()
                 elif ch == "q":
                     stop_flag.set()
                 elif ch in ("\r", "\n"):
@@ -379,7 +469,8 @@ def main():
     ap.add_argument("--rescan", type=float, default=3.0, help="seconds between rescans for new/removed boards (default 3)")
     args = ap.parse_args()
 
-    print("watch_boards.py -- 'n' = dump neighbors.all from all boards, Enter = blank line, 'q'/Ctrl+C to quit\n")
+    print("watch_boards.py -- 'n' = dump neighbors.all, 'b' = dump bridge status, "
+          "'c' = toggle watching companion boards, Enter = blank line, 'q'/Ctrl+C to quit\n")
     threading.Thread(target=keypress_listener, daemon=True).start()
 
     color_idx = 0

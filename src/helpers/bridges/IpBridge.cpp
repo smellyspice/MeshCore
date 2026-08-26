@@ -25,6 +25,13 @@ extern ESPNowBridgeRadio radio_driver;
 #ifndef IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS
 #define IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS 50  // see _next_handshake_poll_at in IpBridge.h
 #endif
+#ifndef IP_BRIDGE_HANDSHAKE_TIMEOUT_MS
+// Generous headroom over mbedTLS's own DTLS retransmit backoff (1s, 2s, 4s,
+// 8s, 16s, ... -- a legitimate slow handshake against a live but lossy peer
+// can genuinely take tens of seconds), while still bounded -- see
+// _handshake_started_at in IpBridge.h for what this actually guards against.
+#define IP_BRIDGE_HANDSHAKE_TIMEOUT_MS 30000
+#endif
 #ifndef IP_BRIDGE_PSK_IDENTITY
 #define IP_BRIDGE_PSK_IDENTITY       "meshcore-bridge"  // not secret, just an identifier
 #endif
@@ -342,6 +349,7 @@ void IpBridge::startConnect() {
   _rx_buffer_pos = 0;
   _state = State::HANDSHAKING;
   _next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
+  _handshake_started_at = millis();
 }
 
 void IpBridge::pollListening() {
@@ -386,10 +394,23 @@ void IpBridge::pollListening() {
   _rx_buffer_pos = 0;
   _state = State::HANDSHAKING;
   _next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
+  _handshake_started_at = millis();
   BRIDGE_DEBUG_PRINTLN("Peer connecting, starting DTLS handshake\n");
 }
 
 void IpBridge::pollHandshake() {
+  if ((int32_t)(millis() - _handshake_started_at) > (int32_t)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS) {
+    // See _handshake_started_at in IpBridge.h -- without this, a peer that
+    // disappears mid-handshake leaves this stuck here forever (server: no
+    // new connection ever accepted; client: never retries). Same recovery
+    // path as any other handshake failure: teardownConnection() already
+    // knows how to get the server back to LISTENING or the client back to
+    // RECONNECT_WAIT.
+    BRIDGE_DEBUG_PRINTLN("DTLS handshake timed out after %ums, giving up\n", (unsigned)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS);
+    teardownConnection(true);
+    return;
+  }
+
   int ret = mbedtls_ssl_handshake(_ssl);
   if (ret == 0) {
     BRIDGE_DEBUG_PRINTLN("DTLS session established\n");
@@ -467,8 +488,11 @@ void IpBridge::checkHeartbeat() {
   }
 
   // Only the client/spoke pings on its own initiative -- see the field comment
-  // on _last_rx_at in IpBridge.h for why the server/hub doesn't.
-  if (!_is_server && (int32_t)(now - _next_ping_at) >= 0) {
+  // on _last_rx_at in IpBridge.h for why the server/hub doesn't. _defer_heartbeat
+  // (see setDeferHeartbeat()) postpones just this send by a tick or two when
+  // ESP-NOW is mid-transaction -- _next_ping_at is deliberately left alone so
+  // it's retried again next loop() instead of being pushed a full interval out.
+  if (!_is_server && !_defer_heartbeat && (int32_t)(now - _next_ping_at) >= 0) {
     BRIDGE_DEBUG_PRINTLN("Sending heartbeat ping\n");
     uint8_t ping = HEARTBEAT_PING;
     sendFramed(&ping, 1);
@@ -533,6 +557,7 @@ void IpBridge::pollConnectedIO() {
       _rx_buffer_pos = 0;
       _state = State::HANDSHAKING;
       _next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
+  _handshake_started_at = millis();
 #ifdef ESPNOW_BRIDGE_RADIO
       radio_driver.setLinkConnected(false);
 #endif
@@ -641,7 +666,17 @@ void IpBridge::sendFramed(const uint8_t *payload, uint16_t len) {
   buffer[4 + len] = (checksum >> 8) & 0xFF;
   buffer[5 + len] = checksum & 0xFF;
 
+  // Timing instrumentation: how long does this call itself actually hold
+  // the CPU/radio, on a board that also runs ESPNowBridge on the same
+  // physical WiFi radio (dual-bridge repeater). mbedtls_ssl_write() is
+  // non-blocking at the socket level (see setupTlsConfig()'s comment on
+  // mbedtls_net_set_nonblock()), but AES/GCM encryption plus the actual
+  // sendto() syscall still take real wall-clock time worth measuring
+  // directly rather than assuming "non-blocking" means "instant".
+  unsigned long t0 = millis();
   int ret = mbedtls_ssl_write(_ssl, buffer, len + OVERHEAD);
+  unsigned long dt = millis() - t0;
+  BRIDGE_DEBUG_PRINTLN("sendFramed: mbedtls_ssl_write took %lums (ret=%d)\n", dt, ret);
   if (ret < 0 && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
     BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_write error %d\n", ret);
     teardownConnection(true);

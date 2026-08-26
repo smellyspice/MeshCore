@@ -789,7 +789,7 @@ bool MyMesh::trySendViaBridge(mesh::Packet* packet) {
       }
     }
 
-    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: DIRECT-route packet (path_hops=%d, type=%d), NOT redirecting -- has its own path to follow\n",
+    BRIDGE_DEBUG_PRINTLN("trySendViaBridge: DIRECT-route packet (path_hops=%d, type=%d), NOT redirecting -- not confidently bridge-only, falling through to normal broadcast + mirror-to-every-bridge\n",
                          (int)packet->getPathHashCount(), (int)packet->getPayloadType());
     return false;
   }
@@ -1691,6 +1691,14 @@ void MyMesh::loop() {
   espnow_bridge.loop();
 #endif
 #ifdef WITH_IP_BRIDGE
+#ifdef WITH_ESPNOW_BRIDGE
+  // See ESPNowBridge::shouldDeferHeartbeat() / IpBridge::setDeferHeartbeat()
+  // -- both bridges share one radio, and the heartbeat ping fires on its own
+  // independent timer, so it can't be staggered against any one packet the
+  // way logTx()'s mirror is. Set fresh every tick, right before ip_bridge
+  // reads it.
+  ip_bridge.setDeferHeartbeat(espnow_bridge.shouldDeferHeartbeat());
+#endif
   ip_bridge.loop();
   flushPendingIpSends();
 #endif
