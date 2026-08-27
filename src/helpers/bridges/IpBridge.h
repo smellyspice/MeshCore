@@ -5,40 +5,50 @@
 #ifdef WITH_IP_BRIDGE
 
 #include <mbedtls/ssl.h>
-#include <mbedtls/ssl_cookie.h>
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
 
 /**
- * @brief Bridge over UDP + DTLS-PSK, for a point-to-point IP link between
+ * @brief Bridge over TCP + TLS-PSK, for a point-to-point IP link between
  * exactly two paired MeshCore nodes.
  *
- * - UDP, not TCP: mbedtls_net_connect() has no non-blocking TCP variant.
- *   Keeps the bridge a synchronous, single-threaded state machine like
- *   RS232Bridge/ESPNowBridge, with no FreeRTOS task or thread-safety surface.
- * - Best-effort, fire-and-forget: no bridge-level packet retry, consistent
- *   with ESPNowBridge.
+ * - TCP, not UDP: the OS's own retransmit/ordering/flow-control replaces
+ *   what would otherwise need to be a hand-rolled ACK+retry layer on top of
+ *   UDP. mbedtls_net_connect() has no non-blocking TCP variant, so the
+ *   connect step is done manually -- a raw non-blocking socket() + connect(),
+ *   polled to completion -- rather than via that call; see startConnect()/
+ *   pollTcpConnecting(). Keeps the bridge a synchronous, single-threaded
+ *   state machine like RS232Bridge/ESPNowBridge, with no FreeRTOS task or
+ *   thread-safety surface.
  * - Role is inferred from config, not a build-time choice:
  *     _prefs->ip_host set -> CLIENT: dials out to ip_host:ip_port.
  *     _prefs->ip_host empty, ip_port set -> SERVER: listens on ip_port,
- *       accepts the first peer to complete a DTLS-PSK handshake, then locks
- *       the socket to that address. Implements mbedTLS's HelloVerifyRequest/
- *       cookie exchange (_cookie_ctx below) as return-routability proof
- *       against source-address spoofing, closing off reflection/
- *       amplification abuse -- not for its usual multi-client purpose, since
- *       there's exactly one peer here by design.
- * - Dead-link detection is app-level (ping/pong heartbeat, N consecutive
- *   misses), since UDP/DTLS gives no OS-level disconnect signal.
+ *       accepts connections, and requires each to complete a TLS-PSK
+ *       handshake before it's trusted with anything.
+ * - A new incoming connection while already CONNECTED to a peer is accepted
+ *   into a separate "challenger" slot and must complete its own TLS-PSK
+ *   handshake before it's allowed to replace the active session -- a bare
+ *   TCP accept() proves nothing (a port scanner or any random connect()
+ *   could otherwise knock out a live tunnel), so the swap only happens once
+ *   the challenger has proven it holds the real secret. See
+ *   pollChallengerHandshake(). This is what lets a legitimately reconnecting
+ *   peer (e.g. after an IP change) get back in without the other side needing
+ *   a manual reboot, while an unauthenticated connection attempt can't touch
+ *   the existing tunnel at all.
+ * - Dead-link detection is still app-level (ping/pong heartbeat, timeout):
+ *   a peer that silently disappears (power loss, cable pull) gives no clean
+ *   TCP close -- only a graceful FIN or an active RST would be caught by the
+ *   OS, and this needs to catch the silent case too.
  * - DNS (client side only) is failure-triggered: reconnect retries the last
  *   known-good IP first, only re-resolving after consecutive failures.
  *
- * Wire framing (once the DTLS session is up) mirrors RS232Bridge:
+ * Wire framing (once the TLS session is up) mirrors RS232Bridge:
  * [2 bytes] Magic Header (0xC03E)
  * [2 bytes] Payload Length
  * [n bytes] Mesh Packet Payload
  * [2 bytes] Fletcher-16 Checksum
- * (DTLS already gives real integrity/authentication; this framing is purely for
+ * (TLS already gives real integrity/authentication; this framing is purely for
  * message-boundary delimiting and reuses the existing pattern rather than
  * inventing a new one.)
  */
@@ -80,8 +90,9 @@ private:
   enum class State : uint8_t {
     IDLE,           // not initialized / stopped
     LISTENING,      // server mode, waiting for a peer to complete a handshake
-    HANDSHAKING,    // DTLS handshake in progress (either role)
-    CONNECTED,      // DTLS session up, ready for framed packets
+    TCP_CONNECTING, // client mode only, non-blocking connect() in progress
+    HANDSHAKING,    // TLS handshake in progress (either role)
+    CONNECTED,      // TLS session up, ready for framed packets
     RECONNECT_WAIT, // client mode only, waiting before retrying
   };
 
@@ -102,27 +113,23 @@ private:
   unsigned long _next_handshake_poll_at = 0;
 
   // millis() when the current HANDSHAKING attempt started -- set at every
-  // entry into that state (startConnect(), pollListening()'s accept, and
-  // the same-source-port CLIENT_RECONNECT case in pollConnectedIO()). Bounds
-  // how long a handshake is allowed to sit unresolved: WANT_READ/WANT_WRITE/
-  // TIMEOUT from mbedtls_ssl_handshake() just means "keep polling, mbedTLS's
-  // own DTLS retransmit is handling it" -- correct behavior for a live peer,
-  // but with no outer bound at all, a peer that disappears mid-handshake
-  // (network switch, IP change, dead) leaves this stuck in HANDSHAKING
-  // forever: the server's listening socket won't accept a new connection
-  // until this one resolves, and nothing ever made it resolve, and observed
-  // live requiring a manual reboot to recover. See checkHeartbeat() for
-  // the equivalent watchdog once actually CONNECTED -- this covers the gap
-  // before that point.
+  // entry into that state (pollTcpConnecting() on success, pollListening()'s
+  // accept). Bounds how long a handshake is allowed to sit unresolved: a
+  // peer that stops responding mid-handshake would otherwise leave this
+  // stuck in HANDSHAKING forever -- the server's listening socket still
+  // accepts other connections independently (see the challenger slot below),
+  // but a client-side stall like this needs its own bound to ever recover.
+  // See checkHeartbeat() for the equivalent watchdog once actually
+  // CONNECTED -- this covers the gap before that point.
   unsigned long _handshake_started_at = 0;
 
   // Last known-good IP for the client role, so most reconnects skip DNS.
   char _resolved_ip[16] = {0};
   uint8_t _consecutive_connect_failures = 0;
 
-  // Heartbeat / dead-link detection -- the only way to know the link is down,
-  // since UDP/DTLS gives no OS-level disconnect signal. Only the client
-  // pings on its own initiative; the server never sends pings, so both
+  // Heartbeat / dead-link detection -- the only way to know the link is down
+  // when the peer disappears silently rather than closing cleanly. Only the
+  // client pings on its own initiative; the server never sends pings, so both
   // roles instead watch _last_rx_at, updated on any valid received frame
   // (ping, pong, or a real mesh packet). If too long has passed since
   // anything was heard, the link is dead -- a simple time-since-last-rx
@@ -131,31 +138,33 @@ private:
   unsigned long _next_ping_at = 0;
   bool _defer_heartbeat = false;  // see setDeferHeartbeat()
 
-  struct Timer {
-    unsigned long int_at = 0;
-    unsigned long fin_at = 0;
-    bool active = false;
-  };
-
   mbedtls_net_context _listen_fd;
 
   mbedtls_net_context _conn_fd_slot;
   mbedtls_ssl_context _ssl_slot;
-  Timer _timer_slot;
   mbedtls_net_context *_conn_fd = &_conn_fd_slot;
   mbedtls_ssl_context *_ssl = &_ssl_slot;
-  Timer *_timer = &_timer_slot;
+
+  // "Challenger" slot: a second, fully separate connection accepted while
+  // already CONNECTED to a peer. Held only transiently while it proves
+  // itself via its own TLS-PSK handshake -- see pollChallengerHandshake().
+  // Never touches the active session's _conn_fd/_ssl above unless/until the
+  // challenger's handshake actually succeeds, at which point it's promoted
+  // and the old active session is torn down.
+  bool _challenger_active = false;
+  mbedtls_net_context _challenger_fd;
+  mbedtls_ssl_context _challenger_ssl;
+  unsigned long _challenger_handshake_started_at = 0;
+  unsigned char _challenger_ip[16];
+  size_t _challenger_ip_len = 0;
 
   mbedtls_ssl_config _ssl_conf;
   mbedtls_ctr_drbg_context _ctr_drbg;
   mbedtls_entropy_context _entropy;
-  mbedtls_ssl_cookie_ctx _cookie_ctx;  // server-only, harmless to init/free as client too
   bool _tls_conf_ready = false;
 
-  // Source address of the peer currently mid-handshake (server role only) --
-  // needed by mbedtls_ssl_set_client_transport_id(), including re-asserting it
-  // after MBEDTLS_ERR_SSL_HELLO_VERIFY_REQUIRED resets the SSL context (see
-  // pollHandshake()).
+  // Source address of the currently-active peer (server role only) -- purely
+  // for formatStatus()'s "connected to peer X.X.X.X" display.
   unsigned char _client_ip[16];
   size_t _client_ip_len = 0;
 
@@ -174,16 +183,17 @@ private:
 
   bool setupTlsConfig();
   void teardownConnection(bool reconnect);
-  void startListen();         // server: open+bind the listening socket
-  void startConnect();        // client: kick off a new attempt (cached IP first)
-  void pollListening();
-  void pollHandshake();
+  void startListen();              // server: open+bind+listen the listening socket
+  void startConnect();             // client: kick off a new non-blocking connect() (cached IP first)
+  void pollTcpConnecting();        // client: poll the in-progress connect() for completion
+  void pollListening();            // server: accept new connections (primary or challenger)
+  void pollHandshake();            // poll the active session's TLS handshake
+  void pollChallengerHandshake();  // server: poll a pending challenger's TLS handshake
   void pollConnectedIO();
-  void checkHeartbeat();      // send ping if due; teardown if pong overdue
+  void checkHeartbeat();           // send ping if due; teardown if pong overdue
   void processFramedByte(uint8_t b);
   void sendFramed(const uint8_t *payload, uint16_t len);  // shared: packets + heartbeat
-  static int timerGetDelay(void *ctx);
-  static void timerSetDelay(void *ctx, uint32_t int_ms, uint32_t fin_ms);
+  bool setupSslContext(mbedtls_ssl_context *ssl, mbedtls_net_context *fd);  // shared: ssl_setup + set_bio
 };
 
 #endif
