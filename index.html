@@ -456,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta4"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta5"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -665,6 +665,22 @@
     </ul>
   </section>
 
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 5</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      Repeater firmware only, same three boards. No-LoRa companion assets
+      are unchanged, still on the
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
+    </p>
+    <ul>
+      <li><strong>Changed</strong> &mdash; the IP bridge now runs over TCP+TLS-PSK instead of UDP+DTLS-PSK. UDP gave no delivery guarantee: a dropped datagram on the IP hop was silently invisible on both ends, indistinguishable from a failure anywhere else. TCP's own retransmit/ordering now covers that. The client-side connect is done with a manual non-blocking <code>socket()</code>/<code>connect()</code>, since mbedTLS has no non-blocking TCP variant &mdash; keeps the bridge's synchronous, single-threaded design intact, no new task added.</li>
+      <li><strong>New</strong> &mdash; a new incoming connection can no longer preempt an active session just by connecting. It now has to complete its own TLS-PSK handshake, proving it holds the real shared secret, before it's allowed to replace the current peer. This also fixes a real issue found during testing: previously, if a peer's IP changed, the other side needed a manual reboot to accept the new connection; now a legitimately reconnecting peer gets back in automatically once it re-authenticates.</li>
+      <li><strong>New</strong> &mdash; TCP-level keepalive (30s idle, 10s probe interval, 3 probes) as a backstop alongside the existing app-level ping/pong heartbeat.</li>
+      <li><strong>Deployment note</strong> &mdash; if you reach a repeater through port-forwarding/DDNS for the IP bridge, the forwarded port now needs to allow TCP, not just UDP.</li>
+    </ul>
+  </section>
+
   <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
 
   <section>
@@ -687,7 +703,7 @@
       <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta4">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta5">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
