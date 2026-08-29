@@ -718,6 +718,31 @@
 <span class="k">set</span> wifi.pwd &lt;your password&gt;
 <span class="k">set</span> ip.host &lt;peer host or IP&gt;</pre>
       <p style="margin-top: 0.8rem;">
+        Once it's up, don't just assume it's working — these
+        <code>get</code> commands (plus <code>neighbors.all</code>) cover
+        every hop: WiFi, the ESP&#8209;NOW side-channel, and the IP link
+        itself:
+      </p>
+      <pre class="cli"><span class="k">get</span> wifi.status
+<span class="k">get</span> bridge.channel
+<span class="k">get</span> ip.status
+<span class="k">neighbors.all</span></pre>
+      <p style="margin-top: 0.8rem;">
+        <code>wifi.status</code> confirms the board actually associated
+        (connected, IP, RSSI). <code>bridge.channel</code> shows the
+        configured ESP&#8209;NOW channel next to the radio's actual live
+        channel and flags it explicitly if they've drifted apart (they share
+        one physical radio, and WiFi wins once it's connected).
+        <code>ip.status</code> reports whether the TCP+TLS&#8209;PSK tunnel to
+        the peer is currently up. <code>neighbors.all</code> merges RF-heard
+        and bridge-heard neighbours into one list with a <code>via</code>
+        column, so you can see which peers are actually reachable and
+        through which path. The rest of what's configured
+        (<code>get ip.host</code> / <code>get ip.port</code> /
+        <code>get wifi.ssid</code> / <code>get bridge.secret</code>, etc.)
+        reads back the same way any <code>set</code> value does.
+      </p>
+      <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
         <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta6">releases page</a>
