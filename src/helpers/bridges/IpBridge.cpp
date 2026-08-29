@@ -26,7 +26,13 @@ extern ESPNowBridgeRadio radio_driver;
 #define IP_BRIDGE_PONG_TIMEOUT_MS    45000   // ~3 missed pings -> dead link
 #endif
 #ifndef IP_BRIDGE_RECONNECT_DELAY_MS
-#define IP_BRIDGE_RECONNECT_DELAY_MS 5000    // short, capped -- no exponential backoff
+#define IP_BRIDGE_RECONNECT_DELAY_MS 5000    // base delay -- see reconnectDelayFor()
+#endif
+#ifndef IP_BRIDGE_RECONNECT_MAX_MS
+#define IP_BRIDGE_RECONNECT_MAX_MS   60000   // cap backoff at 60s -- this bridge only
+                                              // ever has one peer, no shared server to
+                                              // be gentle on, so bias toward noticing
+                                              // the peer come back over minimizing retries
 #endif
 #ifndef IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS
 #define IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS 50  // see _next_handshake_poll_at in IpBridge.h
@@ -65,6 +71,19 @@ extern ESPNowBridgeRadio radio_driver;
 // still being actively debugged. Also incidentally keeps NAT/router
 // connection-tracking state alive on a port-forwarded path, independent of
 // app-level traffic.
+// Client-only concept -- the server has no "reconnect", it just stays
+// LISTENING (a fresh peer is always welcome, no backoff needed there).
+// Doubles the base delay per consecutive failure, capped at
+// IP_BRIDGE_RECONNECT_MAX_MS, so a peer that's down for an extended stretch
+// (not just a transient blip) gets retried less aggressively over time
+// instead of a flat 5s forever. Shift is clamped well before it could push
+// the value past the cap anyway, just to keep the math trivially safe.
+static uint32_t reconnectDelayFor(uint8_t consecutive_failures) {
+  uint8_t shift = consecutive_failures > 6 ? 6 : consecutive_failures;
+  uint32_t delay = (uint32_t)IP_BRIDGE_RECONNECT_DELAY_MS << shift;
+  return delay > IP_BRIDGE_RECONNECT_MAX_MS ? IP_BRIDGE_RECONNECT_MAX_MS : delay;
+}
+
 static void applyTcpKeepalive(int fd) {
   int one = 1;
   setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
@@ -291,6 +310,32 @@ void IpBridge::formatStatus(char *reply) const {
   }
 }
 
+void IpBridge::scheduleReconnect() {
+  _state = State::RECONNECT_WAIT;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    // No network at all right now -- this isn't "the peer is unreachable",
+    // it's "there's nothing to even try over yet". Don't let this pile onto
+    // the backoff: keep polling at the short base interval instead, so once
+    // WiFi actually comes back (it has its own independent reconnect logic,
+    // see main.cpp's wifi_needs_reconnect handling) the very next attempt
+    // happens quickly rather than waiting out a multi-minute backoff window
+    // that had nothing to do with the peer at all. If the peer genuinely
+    // isn't answering once WiFi IS up, the real backoff below starts fresh.
+    _consecutive_connect_failures = 0;
+    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    BRIDGE_DEBUG_PRINTLN("No WiFi yet, retrying in %us\n", (unsigned)(IP_BRIDGE_RECONNECT_DELAY_MS / 1000));
+    return;
+  }
+
+  _consecutive_connect_failures++;
+  uint32_t delay = reconnectDelayFor(_consecutive_connect_failures);
+  _next_action_at = millis() + delay;
+  BRIDGE_DEBUG_PRINTLN("Reconnecting in %us (%u consecutive failure%s)\n",
+                        (unsigned)(delay / 1000), (unsigned)_consecutive_connect_failures,
+                        _consecutive_connect_failures == 1 ? "" : "s");
+}
+
 void IpBridge::startListen() {
   char port_str[8];
   snprintf(port_str, sizeof(port_str), "%u", (unsigned)_prefs->ip_port);
@@ -309,18 +354,26 @@ void IpBridge::startListen() {
 void IpBridge::startConnect() {
   // Only re-resolve after a couple of consecutive failures against the cached IP --
   // most reconnects are transient blips, not an actual home IP change, so this
-  // keeps DNS lookups rare rather than happening on every reconnect attempt.
+  // skips DNS on the first attempt or two. Since _consecutive_connect_failures
+  // is no longer reset on a successful resolve (see below), every attempt once
+  // past this threshold re-resolves -- deliberate, not a regression: during a
+  // real extended outage this keeps picking up a genuinely changed DDNS IP
+  // instead of only checking once and then giving up on ever re-checking.
   if (_resolved_ip[0] == 0 || _consecutive_connect_failures >= 2) {
     IPAddress ip;
     if (!WiFi.hostByName(_prefs->ip_host, ip)) {
       BRIDGE_DEBUG_PRINTLN("DNS lookup failed for %s\n", _prefs->ip_host);
-      _state = State::RECONNECT_WAIT;
-      _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+      scheduleReconnect();
       return;
     }
     strncpy(_resolved_ip, ip.toString().c_str(), sizeof(_resolved_ip) - 1);
     _resolved_ip[sizeof(_resolved_ip) - 1] = 0;
-    _consecutive_connect_failures = 0;
+    // Deliberately NOT resetting _consecutive_connect_failures here -- a
+    // successful DNS lookup says nothing about whether the peer is actually
+    // reachable, and zeroing the counter on it was undoing the backoff every
+    // time this re-resolve threshold was hit, capping it at 20s forever
+    // instead of ever climbing higher. The counter only resets on an actual
+    // successful connection (see pollHandshake()/pollChallengerHandshake()).
     BRIDGE_DEBUG_PRINTLN("Resolved %s -> %s\n", _prefs->ip_host, _resolved_ip);
   }
 
@@ -336,9 +389,7 @@ void IpBridge::startConnect() {
   int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (fd < 0) {
     BRIDGE_DEBUG_PRINTLN("TCP socket() failed, errno=%d\n", errno);
-    _consecutive_connect_failures++;
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
     return;
   }
 
@@ -356,9 +407,7 @@ void IpBridge::startConnect() {
   if (ret < 0 && errno != EINPROGRESS) {
     BRIDGE_DEBUG_PRINTLN("TCP connect() failed immediately, errno=%d\n", errno);
     close(fd);
-    _consecutive_connect_failures++;
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
     return;
   }
 
@@ -378,9 +427,7 @@ void IpBridge::pollTcpConnecting() {
   if ((int32_t)(millis() - _next_action_at) > 0) {
     BRIDGE_DEBUG_PRINTLN("TCP connect timed out\n");
     mbedtls_net_free(_conn_fd);
-    _consecutive_connect_failures++;
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
     return;
   }
 
@@ -400,16 +447,13 @@ void IpBridge::pollTcpConnecting() {
   if (sock_err != 0) {
     BRIDGE_DEBUG_PRINTLN("TCP connect failed, err=%d\n", sock_err);
     mbedtls_net_free(_conn_fd);
-    _consecutive_connect_failures++;
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
     return;
   }
 
   if (!setupSslContext(_ssl, _conn_fd)) {
     mbedtls_net_free(_conn_fd);
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
     return;
   }
 
@@ -591,9 +635,7 @@ void IpBridge::teardownConnection(bool reconnect) {
     radio_driver.setLinkConnected(false);
 #endif
   } else if (reconnect) {
-    _consecutive_connect_failures++;
-    _state = State::RECONNECT_WAIT;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    scheduleReconnect();
 #ifdef ESPNOW_BRIDGE_RADIO
     radio_driver.setLinkConnected(false);
 #endif

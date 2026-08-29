@@ -183,6 +183,7 @@ private:
 
   bool setupTlsConfig();
   void teardownConnection(bool reconnect);
+  void scheduleReconnect();        // client-only: bump failure count, compute+log backoff, enter RECONNECT_WAIT
   void startListen();              // server: open+bind+listen the listening socket
   void startConnect();             // client: kick off a new non-blocking connect() (cached IP first)
   void pollTcpConnecting();        // client: poll the in-progress connect() for completion

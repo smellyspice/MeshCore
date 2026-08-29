@@ -23,9 +23,14 @@
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
   // These boards have no battery-backed RTC, so rtc_clock resets to a bogus
-  // default every boot until something sets it. Applied once at boot/
-  // reconnect, not continuous drift correction.
+  // default every boot until something sets it. Re-applied periodically (see
+  // NTP_RESYNC_INTERVAL_MS below) to bound long-run drift, not just once at
+  // boot/reconnect.
   bool ntp_synced = false;
+  unsigned long last_ntp_sync_at = 0;
+  #ifndef NTP_RESYNC_INTERVAL_MS
+  #define NTP_RESYNC_INTERVAL_MS (12UL * 60 * 60 * 1000)  // 12h -- drift is slow, no need to be aggressive
+  #endif
 #endif
 
 StdRNG fast_rng;
@@ -265,8 +270,17 @@ void loop() {
     if (now > 1700000000) {   // plausible real UTC time, ie. SNTP has actually landed
       rtc_clock.setCurrentTime((uint32_t)now);
       ntp_synced = true;
+      last_ntp_sync_at = millis();
       MESH_DEBUG_PRINTLN("Clock synced via NTP: %u", (uint32_t)now);
     }
+  } else if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0 &&
+             (millis() - last_ntp_sync_at > NTP_RESYNC_INTERVAL_MS)) {
+    // Same guard as the initial sync: only re-triggered when WiFi is
+    // actually configured. Periodic, not drift-critical -- see the field
+    // comment on ntp_synced above.
+    MESH_DEBUG_PRINTLN("Re-syncing clock via NTP...");
+    configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+    ntp_synced = false;   // re-applied once this new SNTP query lands, same as above
   }
 #endif
 
