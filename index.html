@@ -456,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta5"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta6"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -681,6 +681,23 @@
     </ul>
   </section>
 
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 6</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      Repeater firmware, same three boards, plus the companion &mdash; every
+      file ever shipped across any beta now ships in every new one, so the
+      companion build and both helper scripts are included here too, not
+      just on the beta 1 release.
+    </p>
+    <ul>
+      <li><strong>Changed</strong> &mdash; the IP bridge's reconnect no longer retries at a flat interval forever. On a real connect failure it now backs off (10s &rarr; 20s &rarr; 40s &rarr; 60s, capped) instead of hammering every 5 seconds indefinitely. The cap is deliberately short since this bridge only ever has one peer &mdash; no shared server to be polite to, so the priority is noticing the peer come back quickly.</li>
+      <li><strong>Fixed</strong> &mdash; that backoff wasn't actually escalating past 20s. The periodic DNS re-resolve (kicks in after a couple of failures, in case the peer's address changed) was resetting the failure counter on every successful lookup, since DNS succeeding says nothing about whether the peer itself is reachable. Now the counter only resets on an actual successful connection.</li>
+      <li><strong>New</strong> &mdash; the backoff distinguishes "no WiFi at all" from "WiFi's up but the peer isn't answering." A WiFi outage isn't the peer's fault: while WiFi itself is down, retries stay at a short flat interval instead of growing, so reconnecting happens quickly once WiFi actually comes back.</li>
+      <li><strong>New</strong> &mdash; the board's clock now re-syncs via NTP every 12 hours instead of only once at boot. These boards have no battery-backed RTC, so the clock was previously set once and then left to drift for the rest of the uptime.</li>
+    </ul>
+  </section>
+
   <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
 
   <section>
@@ -703,7 +720,7 @@
       <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta5">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta6">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
