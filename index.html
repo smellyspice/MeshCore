@@ -692,7 +692,7 @@
     </p>
     <ul>
       <li><strong>New</strong> &mdash; a <code>simple_room_server</code> build for the no-LoRa Waveshare S3-Zero, joining a repeater's ESP-NOW bridge the same way the companion does. New env: <code>ESP32_S3_Zero_room_server_bridge_espnow</code>.</li>
-      <li><strong>New</strong> &mdash; that room server can passively listen on one public group channel and feed its text messages straight into the room's post feed &mdash; <code>room.channel &lt;name&gt; &lt;psk&gt;</code> (accepts hex or base64), <code>get room.channel</code> to read it back. Deliberately one channel per board, not several.</li>
+      <li><strong>New</strong> &mdash; that room server can passively listen on one public group channel and feed its text messages straight into the room's post feed &mdash; <code>set room.channel &lt;name&gt; &lt;psk&gt;</code> (accepts hex or base64), <code>get room.channel</code> to read it back. Deliberately one channel per board, not several.</li>
       <li><strong>Fixed</strong> &mdash; a genuinely unconfigured ESP-NOW-bridge board (companion, repeater, or room server) boot-looped. The mesh auto-sends a self-advert on boot regardless of whether the ESP-NOW radio has been configured yet; the send path divided by the configured secret's length, which is zero pre-configuration &mdash; instant crash, every boot, on any board that hadn't been set up yet.</li>
       <li><strong>Fixed</strong> &mdash; a board joined to a repeater's ESP-NOW bridge could never receive anything relayed back out that same bridge to reach a different peer on it. A shared dedup table meant a packet arriving over ESP-NOW was already marked "seen" by the time the repeater tried to mirror it back out to another ESP-NOW peer &mdash; silently dropped every time, regardless of RF conditions.</li>
       <li><strong>Fixed</strong> &mdash; once a repeater's ESP-NOW bridge had learned even one peer, it stopped broadcasting entirely, permanently excluding any peer that never transmits unprompted (a passive room server, by design) from every future relay. Flood-route traffic (channel messages, self-adverts) now gets one broadcast after the normal known-peer unicast fan-out; direct traffic's existing unicast-with-retry behavior is unchanged.</li>
@@ -806,7 +806,7 @@
         message board reachable with zero LoRa hardware, with an optional
         extra: it can passively listen on one public group channel and feed
         its messages straight into the room's post feed
-        (<code>room.channel &lt;name&gt; &lt;psk&gt;</code> over its own USB
+        (<code>set room.channel &lt;name&gt; &lt;psk&gt;</code> over its own USB
         serial CLI — this role has a normal text CLI, so no script needed
         for this part). Configured with the same <code>set bridge.channel</code>/
         <code>set bridge.secret</code> as above. If reflashing a board that
