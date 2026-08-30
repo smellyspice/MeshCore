@@ -456,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -681,6 +681,22 @@
     </ul>
   </section>
 
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 8</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      A new feature (ESP-NOW boards syncing time off a repeater automatically),
+      plus the ESP32-C3 "Super Mini" going from an untested spec to confirmed
+      working on real hardware &mdash; and a real bug found in getting there.
+    </p>
+    <ul>
+      <li><strong>New</strong> &mdash; ESP-NOW time-sync beacon. A repeater running both the ESP-NOW and IP bridges together already has real NTP time; it now broadcasts that time to its ESP-NOW segment every 5 minutes, authenticated purely by the shared <code>bridge.secret</code>. Any no-LoRa ESP-NOW board (companion, repeater-role, or room server) picks it up and sets its own clock, once per 12-hour cooldown so a steady stream of beacons only actually moves the clock about twice a day. No CLI action needed on either side.</li>
+      <li><strong>Confirmed on real hardware</strong> &mdash; the ESP32-C3 "Super Mini" (companion/repeater/room-server roles), first shipped as an untested spec in beta 7. Found and fixed a real bug along the way: the generic PlatformIO board definition for this chip doesn't enable native USB CDC the way the S3-Zero's does, so the serial CLI was completely silent on a fresh board even though flashing itself worked fine.</li>
+      <li><strong>Changed</strong> &mdash; the room server's channel-bridge command renamed <code>room.channel &lt;name&gt; &lt;psk&gt;</code> &rarr; <code>set room.channel &lt;name&gt; &lt;psk&gt;</code>, for consistency with the rest of the CLI's <code>set</code>/<code>get</code> convention.</li>
+      <li><strong>Fixed</strong> &mdash; the ESP-NOW bridge's repeater&rarr;client retry ceiling raised 3&rarr;12, matching the client&rarr;repeater direction's existing ceiling. Both directions cross the same physical, sometimes-marginal link &mdash; there was no reason retries should help only one of them.</li>
+    </ul>
+  </section>
+
   <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 7</div><div class="rule"></div></div>
 
   <section>
@@ -763,7 +779,7 @@
       <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
@@ -780,7 +796,7 @@
         radio, so it uses zero LoRa airtime. Flash it the same way as a
         repeater (grab
         <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8">releases page</a>
         or <a href="https://github.com/smellyspice/MeshCore/blob/espnow-ip-bridge/README.md">build it yourself</a>),
         then one extra step: there's no phone-app UI yet for its
         ESP&#8209;NOW channel/secret, so it needs a small script (also
