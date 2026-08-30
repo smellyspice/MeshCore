@@ -330,6 +330,15 @@ bool ESPNowBridgeRadio::startSendRaw(const uint8_t* bytes, int len) {
     ESPNOW_DEBUG_PRINTLN("Send failed: packet too large for bridge framing (%d > %d)", len, (int)MAX_BRIDGE_PAYLOAD_SIZE);
     return false;
   }
+  if (s_secret[0] == 0) {
+    // Unconfigured board (bridge.secret never set) -- xorCrypt()'s keyLen
+    // would be 0, causing a divide-by-zero (i % keyLen) crash. The mesh
+    // dispatcher doesn't know this radio is unconfigured and will still try
+    // to send a self-advert on boot regardless, so this has to be enforced
+    // here, not just left to the "stays inert" comment in init() above.
+    ESPNOW_DEBUG_PRINTLN("Send failed: bridge.secret not configured yet");
+    return false;
+  }
 
   // ESP-NOW sends complete in under a millisecond -- strictly tracking actual
   // TX duration would make the LED an imperceptible flicker, so instead hold
