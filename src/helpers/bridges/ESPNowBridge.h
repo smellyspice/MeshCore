@@ -99,7 +99,13 @@ private:
   // that arrive while a previous packet's fan-out/retries are still in flight.
   static const uint8_t MAX_KNOWN_PEERS = 6;
   static const uint8_t MAX_QUEUED_SENDS = 4;
-  static const uint8_t MAX_SEND_ATTEMPTS = 3;      // 1 initial + 2 retries, per peer
+  // Matches ESPNowBridgeRadio.cpp's MAX_TX_ATTEMPTS (raised 4->12 in beta 4 for
+  // the exact same reason): the client->bridge direction and this bridge->client
+  // direction cross the same physical, sometimes-marginal ESP-NOW link -- there's
+  // no reason retries would help one direction and not the other. This constant
+  // was never raised alongside the client-side one, leaving replies/relays back
+  // out to a peer meaningfully less reliable than requests coming in.
+  static const uint8_t MAX_SEND_ATTEMPTS = 12;     // 1 initial + 11 retries, per peer
   static const uint32_t SEND_RETRY_DELAY_MS = 30;  // backoff before re-trying a failed unicast
 
   uint8_t _known_peers[MAX_KNOWN_PEERS][6];

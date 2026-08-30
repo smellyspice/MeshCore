@@ -1105,12 +1105,12 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     } else {
       strcpy(reply, "> (not set)");
     }
-  } else if (memcmp(command, "room.channel ", 13) == 0) {
-    char* name = command + 13;
+  } else if (memcmp(command, "set room.channel ", 17) == 0) {
+    char* name = command + 17;
     while (*name == ' ') name++;
     char* sp = strchr(name, ' ');
     if (sp == NULL) {
-      strcpy(reply, "Err - expected: room.channel <name> <psk_base64>");
+      strcpy(reply, "Err - expected: set room.channel <name> <psk_base64>");
     } else {
       *sp++ = 0;   // split name/psk
       while (*sp == ' ') sp++;
