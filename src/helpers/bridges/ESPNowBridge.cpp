@@ -230,18 +230,35 @@ void ESPNowBridge::advanceToNextPeerOrFinish() {
   bool wasBroadcast = (_active_peer_idx == PEER_IDX_BROADCAST);
   uint8_t nextPeerIdx = wasBroadcast ? 0 : (uint8_t)(_active_peer_idx + 1);
 
-  if (_known_peer_count > 0 && nextPeerIdx < _known_peer_count) {
+  if (!wasBroadcast && _known_peer_count > 0 && nextPeerIdx < _known_peer_count) {
     _active_peer_idx = nextPeerIdx;
     _send_attempt = 0;
     issueSend();
-  } else {
-    // Done fanning out to every known peer (or the sole broadcast attempt,
-    // if none were known yet) -- free this queue slot and pick up whatever's
-    // next.
-    _send_queue[_active_queue_idx].in_use = false;
-    _active_queue_idx = -1;
-    progressSend();
+    return;
   }
+
+  // Unicast fan-out to every known peer is done (or there were none). FLOOD
+  // traffic still needs to reach whoever we haven't individually learned yet
+  // -- a purely passive listener (e.g. a room server that never transmits)
+  // would otherwise never be reachable once ANY other peer becomes known,
+  // since the branch above only ever unicasts to the known-peers list. One
+  // extra broadcast covers that, without giving up the unicast-with-retry
+  // reliability benefit for peers we do know. DIRECT traffic (a single real
+  // destination) skips this -- unicast-with-retry to a known peer, or the
+  // sole bootstrap broadcast if none are known yet, is already correct for it.
+  if (!wasBroadcast && !_flood_broadcast_done && _known_peer_count > 0 &&
+      _send_queue[_active_queue_idx].is_flood) {
+    _flood_broadcast_done = true;
+    _active_peer_idx = PEER_IDX_BROADCAST;
+    _send_attempt = 0;
+    issueSend();
+    return;
+  }
+
+  // Done -- free this queue slot and pick up whatever's next.
+  _send_queue[_active_queue_idx].in_use = false;
+  _active_queue_idx = -1;
+  progressSend();
 }
 
 void ESPNowBridge::issueSend() {
@@ -273,6 +290,7 @@ void ESPNowBridge::progressSend() {
       _active_queue_idx = i;
       _active_peer_idx = (_known_peer_count == 0) ? PEER_IDX_BROADCAST : 0;
       _send_attempt = 0;
+      _flood_broadcast_done = false;
       issueSend();
       return;
     }
@@ -291,8 +309,8 @@ void ESPNowBridge::sendPacket(mesh::Packet *packet) {
     return;
   }
 
-  if (_seen_packets.wasSeen(packet)) return;
-  _seen_packets.markSeen(packet);
+  if (_tx_seen.wasSeen(packet)) return;
+  _tx_seen.markSeen(packet);
 
   // Create a temporary buffer just for size calculation and reuse for actual writing
   uint8_t sizingBuffer[MAX_PAYLOAD_SIZE];
@@ -318,6 +336,7 @@ void ESPNowBridge::sendPacket(mesh::Packet *packet) {
   }
 
   QueuedSend &q = _send_queue[slot];
+  q.is_flood = packet->isRouteFlood();
 
   // Write magic header (2 bytes)
   q.buffer[0] = (BRIDGE_PACKET_MAGIC >> 8) & 0xFF;

@@ -69,6 +69,17 @@ private:
   /** Current position in receive buffer */
   size_t _rx_buffer_pos;
 
+  // BridgeBase's inherited _seen_packets is shared between RX and TX -- a
+  // packet that arrived FROM this bridge (e.g. a companion/room-server-role
+  // peer on the same ESP-NOW segment) is already marked seen by the time
+  // logTx()'s mirror-back call reaches sendPacket() below, so it gets
+  // silently dropped instead of relayed to any other peer on this same
+  // bridge -- a real, 100%-reproducible failure for any peer-to-peer
+  // relay through this bridge, not an RF/reliability issue. Same class of
+  // bug IpBridge already fixed the same way (see IpBridge.h's _tx_seen);
+  // ESPNowBridge just hadn't been given the equivalent fix yet.
+  SimpleMeshTables _tx_seen;
+
   // --- Reliability: unicast-with-retry instead of fire-and-forget broadcast ---
   //
   // Broadcast ESP-NOW frames get NO MAC-layer ACK/retry at all (that's normal
@@ -98,6 +109,11 @@ private:
     uint8_t buffer[MAX_ESPNOW_PACKET_SIZE];
     size_t len = 0;
     bool in_use = false;
+    // FLOOD-route traffic (group channel messages, adverts, etc.) is meant
+    // to reach everyone, not just peers we've individually heard from --
+    // unlike DIRECT traffic, which has one real destination and benefits
+    // from unicast-with-retry to it specifically. See advanceToNextPeerOrFinish().
+    bool is_flood = false;
   };
   QueuedSend _send_queue[MAX_QUEUED_SENDS];
 
@@ -107,6 +123,10 @@ private:
   uint8_t _send_attempt = 0;
   bool _send_in_flight = false;
   bool _send_awaiting_retry = false;
+  // Set once the extra post-unicast-fan-out broadcast (FLOOD traffic only,
+  // see advanceToNextPeerOrFinish()) has been done for the current queued
+  // send, so it fires at most once per packet, not every time advance is called.
+  bool _flood_broadcast_done = false;
   unsigned long _send_retry_at = 0;
   unsigned long _send_issued_at = 0;  // millis() at issueSend() -- timing instrumentation, see onSendResult()
 
