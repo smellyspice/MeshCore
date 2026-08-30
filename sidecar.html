@@ -74,7 +74,7 @@
 
   /* ---------- use-case cards ---------- */
   .usecase-grid { display: grid; grid-template-columns: 1fr; gap: 1.1rem; }
-  @media (min-width: 720px) { .usecase-grid { grid-template-columns: 1fr 1fr 1fr; } }
+  @media (min-width: 640px) { .usecase-grid { grid-template-columns: 1fr 1fr; } }
   .usecase {
     border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
     padding: 1.4rem 1.5rem;
@@ -152,21 +152,22 @@
     <div class="kicker">MeshCore &middot; community fork &middot; espnow-ip-bridge</div>
     <h1 class="title">Sidecar</h1>
     <p class="pitch">
-      A companion, room server, or second repeater that tethers to a
-      Trifecta repeater over ESP&#8209;NOW or IP instead of a second LoRa
-      hop. It can't work on its own — it always needs a paired repeater
-      running the bridge — but that's the point: you already decided where
-      that repeater goes, this is how everything else reaches it.
+      A companion, room server, or repeater-role board — none of them with
+      a LoRa radio of their own — that tethers to a Trifecta repeater over
+      ESP&#8209;NOW instead of a second LoRa hop. It can't work on its own —
+      it always needs a paired repeater running the bridge — but that's the
+      point: you already decided where that repeater goes, this is how
+      everything else reaches it.
     </p>
     <div class="chips">
       <span class="chip">Requires a Trifecta repeater</span>
+      <span class="chip">No LoRa radio, ever</span>
       <span class="chip">ESP32 only</span>
-      <span class="chip">No second LoRa radio needed</span>
     </div>
   </header>
 
   <div class="section-head"><div class="diamond"></div><h2>Where this actually helps</h2></div>
-  <p>Three real setups this covers, roughly in order of how much infrastructure they assume:</p>
+  <p>Two real setups this covers:</p>
 
   <div class="usecase-grid">
     <div class="usecase">
@@ -186,48 +187,31 @@
         reaches; let it.
       </p>
     </div>
-    <div class="usecase">
-      <h3>Metal building, dead zone</h3>
-      <p>
-        A basement cafe (or any RF-blind structure) can't reach the
-        well-placed repeater across campus over LoRa at all. Wire up a
-        local repeater there instead, and link it out over the network you
-        already have.
-      </p>
-    </div>
   </div>
 
   <div class="section-head"><div class="diamond"></div><h2>Is this safe for the rest of the mesh?</h2></div>
-  <p>The honest concern with any kind of bridging: does it let traffic behave worse than it would over real RF? Three things specifically address that.</p>
+  <p>The honest concern with any kind of bridging: does it let traffic behave worse than it would over real RF? Two things specifically address that for ESP&#8209;NOW:</p>
 
   <div class="safety">
     <div class="safety-mark">1</div>
     <div class="safety-body">
       <h3>Same airtime budget, no exceptions</h3>
-      <p>Local, ESP&#8209;NOW-bridged, and IP-bridged traffic all funnel through the same duty-cycle-based transmit budget on the real radio. Nothing bypasses it by arriving over a different transport.</p>
+      <p>Local and ESP&#8209;NOW-bridged traffic both funnel through the same duty-cycle-based transmit budget on the host repeater's real radio. Nothing bypasses it by arriving over ESP&#8209;NOW.</p>
     </div>
   </div>
   <div class="safety">
     <div class="safety-mark">2</div>
     <div class="safety-body">
       <h3>Region scoping still applies</h3>
-      <p>Broadcast-domain controls already in MeshCore (region/transport-code scoping) sit in the same receive pipeline whether a packet arrived over LoRa or over a bridge. An operator can turn a bridge into a hard broadcast boundary with existing CLI config alone — nothing new to learn.</p>
-    </div>
-  </div>
-  <div class="safety">
-    <div class="safety-mark">3</div>
-    <div class="safety-body">
-      <h3>A real RF path always gets the first shot</h3>
-      <p>When a repeater is bridging to an IP peer, it deliberately holds back a packet that would establish a new path, giving a genuine RF route a short window to win the race first. IP only fills in when RF doesn't complete in time, or when the destination has no LoRa radio at all to begin with.</p>
+      <p>Broadcast-domain controls already in MeshCore (region/transport-code scoping) sit in the same receive pipeline whether a packet arrived over LoRa or over ESP&#8209;NOW. An operator can turn the bridge into a hard broadcast boundary with existing CLI config alone — nothing new to learn.</p>
     </div>
   </div>
 
   <p>
-    That third mechanism — how a repeater actually decides when to let IP
-    fill in versus wait for RF, and what it costs in the rare case it
-    guesses wrong — is a repeater-side feature, so the full breakdown lives
-    on the <a href="trifecta.html">Trifecta overview</a> rather than
-    repeated here.
+    A Sidecar has no LoRa radio at all, so it never has to choose between
+    RF and IP the way a repeater's own IP bridge does. That mechanism — and
+    what it costs when it gets that choice wrong — is covered on the
+    <a href="trifecta.html">Trifecta overview</a> instead.
   </p>
 
   <div class="callout">

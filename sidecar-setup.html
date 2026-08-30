@@ -129,14 +129,6 @@
 <span class="k">set</span> bridge.secret &lt;your key&gt;
 <span class="k">get</span> bridge.channel   <span class="c"># confirm + check for a live-channel mismatch</span>
 <span class="k">get</span> bridge.type      <span class="c"># confirms "espnow" (or "espnow+ip" if IP bridge also configured)</span></pre>
-  <p>If this Sidecar is a second repeater linking in over IP instead of ESP&#8209;NOW, also set:</p>
-  <pre class="cli"><span class="k">set</span> wifi.ssid &lt;name&gt;
-<span class="k">set</span> wifi.pwd &lt;password&gt;
-<span class="k">set</span> ip.host &lt;peer host or IP&gt;   <span class="c"># empty on this side = listen instead of dial out</span>
-<span class="k">set</span> ip.port &lt;port&gt;
-<span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># TLS-PSK, must match the peer</span></pre>
-  <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel your WiFi access point actually operates on — it doesn't get synced automatically. Lock that AP to a fixed channel rather than leaving it on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until <code>bridge.channel</code> is updated to match again.</div>
-
   <p>
     Works on the Waveshare ESP32-S3-Zero and the ESP32-C3 "Super Mini" —
     same commands either way, only the environment name prefix changes
@@ -165,8 +157,14 @@
   </div>
 
   <div class="role">
-    <h3>Repeater (linking in over ESP&#8209;NOW or IP)</h3>
-    <p>Real text CLI, bundles the IP bridge too — so it can simultaneously be an ESP&#8209;NOW Sidecar of one repeater and the far end of an IP link to another. Configure whichever side(s) apply using the commands in step 1, run on this board.</p>
+    <h3>Repeater-role Sidecar (still no LoRa radio)</h3>
+    <p>Same board class as a companion or room server — no LoRa radio here either — just running repeater-role mesh logic instead. Joins its host repeater over ESP&#8209;NOW the same as any Sidecar (step 1 above). It can also optionally run its own IP bridge leg, acting as a cheap ESP&#8209;NOW&harr;IP translator that relays onward to a second Trifecta repeater elsewhere — not the same thing as two real repeaters linking directly (see the <a href="trifecta-setup.html">Trifecta setup page</a> for that):</p>
+    <pre class="cli"><span class="k">set</span> wifi.ssid &lt;name&gt;
+<span class="k">set</span> wifi.pwd &lt;password&gt;
+<span class="k">set</span> ip.host &lt;peer host or IP&gt;   <span class="c"># empty on this side = listen instead of dial out</span>
+<span class="k">set</span> ip.port &lt;port&gt;
+<span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># TLS-PSK, must match the peer</span></pre>
+    <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel this WiFi access point actually operates on — it doesn't get synced automatically. Lock that AP to a fixed channel rather than leaving it on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until <code>bridge.channel</code> is updated to match again.</div>
   </div>
 
   <div class="section-head"><div class="num">3</div><h2>Verify it actually joined</h2></div>
