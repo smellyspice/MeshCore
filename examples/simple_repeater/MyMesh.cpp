@@ -1683,6 +1683,21 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   }
 }
 
+#if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
+void MyMesh::maybeBroadcastTime(bool time_valid) {
+  if (!time_valid) return;
+  if (_last_time_broadcast_at != 0 &&
+      (millis() - _last_time_broadcast_at) < TIME_BROADCAST_INTERVAL_MS) {
+    return;
+  }
+  if (espnow_bridge.broadcastTime(getRTCClock()->getCurrentTime())) {
+    _last_time_broadcast_at = millis();
+  }
+  // else: busy this round (a real send in flight) -- try again next tick,
+  // still gated by the interval above once it does succeed.
+}
+#endif
+
 void MyMesh::loop() {
 #ifdef WITH_RS232_BRIDGE
   rs232_bridge.loop();

@@ -38,6 +38,18 @@ public:
   static constexpr uint16_t BRIDGE_PACKET_MAGIC = 0xC03E;
 
   /**
+   * @brief Magic number for an ESP-NOW time-sync beacon (see ESPNowBridge::broadcastTime()).
+   *
+   * Distinct from BRIDGE_PACKET_MAGIC so a receiver can tell "this is a plain
+   * 4-byte timestamp, not a wrapped mesh::Packet" before attempting to parse
+   * one as the other. Only ever used on the ESP-NOW bridge segment (not RS232/IP) --
+   * the shared bridge.secret is the entire trust boundary: any board that can
+   * decrypt/checksum-validate a beacon is, by construction, on the same private
+   * ESP-NOW network as whichever repeater broadcast it.
+   */
+  static constexpr uint16_t BRIDGE_TIME_MAGIC = 0xC03F;
+
+  /**
    * @brief Common field sizes used by bridge implementations
    *
    * These constants define the size of common packet fields used across bridges.

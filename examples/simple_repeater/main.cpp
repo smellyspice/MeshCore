@@ -284,6 +284,10 @@ void loop() {
   }
 #endif
 
+#if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
+  the_mesh.maybeBroadcastTime(ntp_synced);
+#endif
+
   rtc_clock.tick();
 
 #ifdef HAS_EXTERNAL_WATCHDOG

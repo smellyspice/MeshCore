@@ -207,6 +207,14 @@ void ESPNowBridge::onDataSent(const uint8_t *mac_addr, esp_now_send_status_t sta
 void ESPNowBridge::onSendResult(bool ok) {
   _send_in_flight = false;
   _last_activity_at = millis();
+
+  if (_time_beacon_pending) {
+    _time_beacon_pending = false;
+    BRIDGE_DEBUG_PRINTLN("Time beacon %s\n", ok ? "sent" : "send failed");
+    progressSend();  // in case a real packet got queued while the beacon was in flight
+    return;
+  }
+
   if (_active_queue_idx < 0) return;  // stray/late callback after a reset -- nothing to do
 
   unsigned long dt = millis() - _send_issued_at;
@@ -360,6 +368,45 @@ void ESPNowBridge::sendPacket(mesh::Packet *packet) {
 
   BRIDGE_DEBUG_PRINTLN("TX queued, len=%d, known_peers=%d\n", meshPacketLen, (int)_known_peer_count);
   progressSend();
+}
+
+bool ESPNowBridge::broadcastTime(uint32_t timestamp) {
+  if (!_initialized) return false;
+  // Same single-send-in-flight rule as the queue machinery -- don't stomp a
+  // real packet's send (or a previous beacon still completing). Skipping this
+  // round is fine; the caller broadcasts again in a few minutes regardless.
+  if (_active_queue_idx >= 0 || _send_in_flight || _send_awaiting_retry) return false;
+
+  static const size_t TIME_PAYLOAD_SIZE = 4;
+  uint8_t buf[BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE + TIME_PAYLOAD_SIZE];
+
+  buf[0] = (BRIDGE_TIME_MAGIC >> 8) & 0xFF;
+  buf[1] = BRIDGE_TIME_MAGIC & 0xFF;
+
+  uint8_t *payload = buf + BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE;
+  payload[0] = (timestamp >> 24) & 0xFF;
+  payload[1] = (timestamp >> 16) & 0xFF;
+  payload[2] = (timestamp >> 8) & 0xFF;
+  payload[3] = timestamp & 0xFF;
+
+  uint16_t checksum = fletcher16(payload, TIME_PAYLOAD_SIZE);
+  buf[2] = (checksum >> 8) & 0xFF;
+  buf[3] = checksum & 0xFF;
+
+  xorCrypt(buf + BRIDGE_MAGIC_SIZE, BRIDGE_CHECKSUM_SIZE + TIME_PAYLOAD_SIZE);
+
+  uint8_t broadcastAddress[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+  _send_in_flight = true;
+  _time_beacon_pending = true;
+  esp_err_t result = esp_now_send(broadcastAddress, buf, sizeof(buf));
+  if (result != ESP_OK) {
+    _send_in_flight = false;
+    _time_beacon_pending = false;
+    BRIDGE_DEBUG_PRINTLN("Time beacon: esp_now_send() failed, err=%d\n", (int)result);
+    return false;
+  }
+  BRIDGE_DEBUG_PRINTLN("Time beacon: broadcasting t=%u\n", timestamp);
+  return true;
 }
 
 void ESPNowBridge::onPacketReceived(mesh::Packet *packet) {

@@ -1,11 +1,14 @@
 #include "ESPNowBridgeRadio.h"
+#include "target.h"  // for the board variant's global rtc_clock -- see handleTimeBeacon() below
 #include <esp_now.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-// Framing must match src/helpers/bridges/ESPNowBridge.cpp (BridgeBase::BRIDGE_PACKET_MAGIC)
-// bit-for-bit, so this radio is wire-compatible with an unmodified repeater's bridge.
+// Framing must match src/helpers/bridges/ESPNowBridge.cpp (BridgeBase::BRIDGE_PACKET_MAGIC/
+// BRIDGE_TIME_MAGIC) bit-for-bit, so this radio is wire-compatible with an unmodified
+// repeater's bridge.
 static const uint16_t BRIDGE_PACKET_MAGIC = 0xC03E;
+static const uint16_t BRIDGE_TIME_MAGIC = 0xC03F;
 static const size_t BRIDGE_MAGIC_SIZE = sizeof(BRIDGE_PACKET_MAGIC);
 static const size_t BRIDGE_CHECKSUM_SIZE = 2;
 static const size_t MAX_ESPNOW_PACKET_SIZE = 250;
@@ -97,6 +100,45 @@ static void xorCrypt(uint8_t* data, size_t len) {
   }
 }
 
+// --- Time-sync beacon (see ESPNowBridge::broadcastTime() for the repeater side) ---
+// Trust boundary is bridge.secret alone: a frame that decrypts and
+// checksum-validates against it came from something on this same private
+// ESP-NOW network, which is exactly the same guarantee the packet path below
+// relies on for RX. No comparison against this board's own current time --
+// just a plausibility floor (matching the repeater's own NTP-landed check)
+// and a cooldown so a steady stream of beacons only actually moves the clock
+// about twice a day.
+static const uint32_t TIME_BEACON_MIN_PLAUSIBLE = 1700000000;  // ~Nov 2023
+static const uint32_t TIME_APPLY_COOLDOWN_MS = 12UL * 60 * 60 * 1000;  // 12h
+static unsigned long s_last_time_applied_at = 0;  // millis(), 0 = never applied yet
+
+static void handleTimeBeacon(const uint8_t* data, int len) {
+  static const size_t TIME_PAYLOAD_SIZE = 4;
+  if (len != (int)(BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE + TIME_PAYLOAD_SIZE)) return;
+  if (s_secret[0] == 0) return;  // unconfigured -- xorCrypt()'s keyLen would be 0
+
+  uint8_t decrypted[BRIDGE_CHECKSUM_SIZE + TIME_PAYLOAD_SIZE];
+  memcpy(decrypted, data + BRIDGE_MAGIC_SIZE, sizeof(decrypted));
+  xorCrypt(decrypted, sizeof(decrypted));
+
+  uint16_t recvChecksum = (decrypted[0] << 8) | decrypted[1];
+  if (fletcher16(decrypted + BRIDGE_CHECKSUM_SIZE, TIME_PAYLOAD_SIZE) != recvChecksum) {
+    return;  // wrong bridge secret, or different network
+  }
+
+  const uint8_t* p = decrypted + BRIDGE_CHECKSUM_SIZE;
+  uint32_t t = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+  if (t < TIME_BEACON_MIN_PLAUSIBLE) return;
+
+  unsigned long now = millis();
+  if (s_last_time_applied_at != 0 && (now - s_last_time_applied_at) < TIME_APPLY_COOLDOWN_MS) {
+    return;  // applied one recently enough -- wait out the cooldown
+  }
+  rtc_clock.setCurrentTime(t);
+  s_last_time_applied_at = now;
+  ESPNOW_DEBUG_PRINTLN("Time beacon applied: %u", t);
+}
+
 // callback when data is sent
 static void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   unsigned long now = millis();
@@ -121,6 +163,10 @@ static void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   }
 
   uint16_t magic = (data[0] << 8) | data[1];
+  if (magic == BRIDGE_TIME_MAGIC) {
+    handleTimeBeacon(data, len);
+    return;
+  }
   if (magic != BRIDGE_PACKET_MAGIC) {
     return;  // not a bridge packet, ignore
   }

@@ -136,6 +136,16 @@ private:
   unsigned long _send_retry_at = 0;
   unsigned long _send_issued_at = 0;  // millis() at issueSend() -- timing instrumentation, see onSendResult()
 
+  // --- Time-sync beacon (see broadcastTime()) ---
+  // A one-shot broadcast, not routed through the queue/fan-out machinery
+  // above (it has no mesh::Packet, no peer-specific destination, and no
+  // retry -- missing one is fine, another follows in a few minutes). It
+  // still shares the single esp_now_send()-in-flight-at-a-time constraint
+  // everything else here respects, so it's gated by (and sets) the same
+  // _send_in_flight flag; this flag tells onSendResult() the completing
+  // callback belongs to the beacon, not the queue.
+  bool _time_beacon_pending = false;
+
   // millis() of the last completed send (success or final failure) or
   // received frame -- see shouldDeferHeartbeat().
   unsigned long _last_activity_at = 0;
@@ -266,6 +276,20 @@ public:
    * @param packet The mesh packet to transmit
    */
   void sendPacket(mesh::Packet *packet) override;
+
+  /**
+   * Broadcasts a 4-byte UTC timestamp to every board on this ESP-NOW segment,
+   * framed/encrypted the same way as everything else here (magic + Fletcher-16
+   * checksum + XOR keyed by bridge.secret) but with BRIDGE_TIME_MAGIC instead
+   * of BRIDGE_PACKET_MAGIC, so ESPNowBridgeRadio clients can tell it apart from
+   * a wrapped mesh::Packet without attempting to parse it as one. Caller
+   * (simple_repeater's main.cpp/MyMesh) is responsible for only calling this
+   * with a real NTP-sourced timestamp, and for pacing the calls -- this makes
+   * no attempt to rate-limit itself. Returns false (and sends nothing) if the
+   * bridge isn't initialized or a send is already in flight -- safe to just
+   * skip that round and try again on the next scheduled call.
+   */
+  bool broadcastTime(uint32_t timestamp);
 
   /**
    * True while a send is in flight, or briefly after any send/receive

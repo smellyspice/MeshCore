@@ -195,6 +195,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #endif
 #ifdef WITH_ESPNOW_BRIDGE
   ESPNowBridge espnow_bridge;
+#if defined(WITH_IP_BRIDGE)
+  unsigned long _last_time_broadcast_at = 0;  // millis(), 0 = never yet -- see maybeBroadcastTime()
+  static const uint32_t TIME_BROADCAST_INTERVAL_MS = 5UL * 60 * 1000;  // 5 min
+#endif
 #endif
 #ifdef WITH_IP_BRIDGE
   IpBridge ip_bridge;
@@ -330,6 +334,20 @@ public:
 
   void handleCommand(uint32_t sender_timestamp, char* command, char* reply);
   void loop();
+
+#if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
+  /**
+   * Broadcasts this repeater's current time to the ESP-NOW segment
+   * (ESPNowBridge::broadcastTime()) every TIME_BROADCAST_INTERVAL_MS, but
+   * only while time_valid is true -- callers (main.cpp) should pass their own
+   * "has NTP actually landed" flag, since a fresh boot's default clock must
+   * never get broadcast as if it were real. Call every loop() tick; internally
+   * a no-op except right at the interval boundary. Only compiled in for a
+   * dual-bridge repeater (WITH_IP_BRIDGE is where NTP time actually comes
+   * from -- WITH_ESPNOW_BRIDGE alone has no time source to broadcast).
+   */
+  void maybeBroadcastTime(bool time_valid);
+#endif
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {
