@@ -456,7 +456,7 @@
     </div>
     <nav class="quicklinks">
       <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta6"><span class="arrow">&#8599;</span> Firmware</a>
+      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7"><span class="arrow">&#8599;</span> Firmware</a>
       <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
     </nav>
   </header>
@@ -681,6 +681,24 @@
     </ul>
   </section>
 
+  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 7</div><div class="rule"></div></div>
+
+  <section>
+    <p class="lede">
+      Repeater firmware, the companion, and a new room-server build &mdash;
+      the no-LoRa companion's own binary is different this round too, not
+      just repeaters, since two of the fixes below live in radio/bridge code
+      the companion shares.
+    </p>
+    <ul>
+      <li><strong>New</strong> &mdash; a <code>simple_room_server</code> build for the no-LoRa Waveshare S3-Zero, joining a repeater's ESP-NOW bridge the same way the companion does. New env: <code>ESP32_S3_Zero_room_server_bridge_espnow</code>.</li>
+      <li><strong>New</strong> &mdash; that room server can passively listen on one public group channel and feed its text messages straight into the room's post feed &mdash; <code>room.channel &lt;name&gt; &lt;psk&gt;</code> (accepts hex or base64), <code>get room.channel</code> to read it back. Deliberately one channel per board, not several.</li>
+      <li><strong>Fixed</strong> &mdash; a genuinely unconfigured ESP-NOW-bridge board (companion, repeater, or room server) boot-looped. The mesh auto-sends a self-advert on boot regardless of whether the ESP-NOW radio has been configured yet; the send path divided by the configured secret's length, which is zero pre-configuration &mdash; instant crash, every boot, on any board that hadn't been set up yet.</li>
+      <li><strong>Fixed</strong> &mdash; a board joined to a repeater's ESP-NOW bridge could never receive anything relayed back out that same bridge to reach a different peer on it. A shared dedup table meant a packet arriving over ESP-NOW was already marked "seen" by the time the repeater tried to mirror it back out to another ESP-NOW peer &mdash; silently dropped every time, regardless of RF conditions.</li>
+      <li><strong>Fixed</strong> &mdash; once a repeater's ESP-NOW bridge had learned even one peer, it stopped broadcasting entirely, permanently excluding any peer that never transmits unprompted (a passive room server, by design) from every future relay. Flood-route traffic (channel messages, self-adverts) now gets one broadcast after the normal known-peer unicast fan-out; direct traffic's existing unicast-with-retry behavior is unchanged.</li>
+    </ul>
+  </section>
+
   <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 6</div><div class="rule"></div></div>
 
   <section>
@@ -745,7 +763,7 @@
       <p style="margin-top: 0.8rem;">
         Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
         Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta6">releases page</a>
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7">releases page</a>
         — grab the plain <code>.bin</code> to upgrade an existing board
         (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
         for a blank one, flash with <code>esptool.py</code>, then configure
@@ -762,9 +780,7 @@
         radio, so it uses zero LoRa airtime. Flash it the same way as a
         repeater (grab
         <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 releases page</a>
-        — unchanged since beta&nbsp;1, so still there rather than on the
-        newer repeater-firmware release —
+        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta7">releases page</a>
         or <a href="https://github.com/smellyspice/MeshCore/blob/espnow-ip-bridge/README.md">build it yourself</a>),
         then one extra step: there's no phone-app UI yet for its
         ESP&#8209;NOW channel/secret, so it needs a small script (also
@@ -782,6 +798,23 @@
         pyserial</code>. Every other role — repeaters, and companions with
         their own LoRa radio talking to a Trifecta repeater normally —
         needs nothing extra at all.
+      </p>
+      <p style="margin-top: 0.8rem;">
+        Same board, same ESP-NOW join, different firmware role: a
+        <code>simple_room_server</code> build (<code>ESP32_S3_Zero_room_server_bridge_espnow</code>,
+        also on the beta&nbsp;7 releases page) turns this into a BBS-style
+        message board reachable with zero LoRa hardware, with an optional
+        extra: it can passively listen on one public group channel and feed
+        its messages straight into the room's post feed
+        (<code>room.channel &lt;name&gt; &lt;psk&gt;</code> over its own USB
+        serial CLI — this role has a normal text CLI, so no script needed
+        for this part). Configured with the same <code>set bridge.channel</code>/
+        <code>set bridge.secret</code> as above. If reflashing a board that
+        was previously running a different role, erase flash fully first
+        (<code>esptool.py erase_flash</code>) before flashing the merged
+        image — a role change doesn't touch the separate config partition
+        otherwise, and stale settings from the old role can cause boot
+        issues.
       </p>
     </div>
 
