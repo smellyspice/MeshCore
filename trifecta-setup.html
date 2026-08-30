@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trifecta Repeater — Setup</title>
+<meta name="description" content="Flash and configure a Trifecta repeater — LoRa, ESP-NOW bridge, and IP bridge.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg: #EEF1F0; --surface: #FFFFFF; --surface-2: #E4E9E7;
+    --ink: #16221F; --ink-dim: #3F4F4B; --ink-faint: #6B7A76;
+    --line: #D6DEDC; --accent: #0E7C7B; --accent-ink: #FFFFFF;
+    --amber: #A5650F; --amber-bg: #F6E9D6;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+      --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+      --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+      --amber: #E3A34B; --amber-bg: #2B2013;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+    --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+    --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+    --amber: #E3A34B; --amber-bg: #2B2013;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.65; font-size: 17px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--mono); font-weight: 600; text-wrap: balance; color: var(--ink); margin: 0; }
+  code, pre, kbd { font-family: var(--mono); }
+
+  .page { max-width: 820px; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; }
+
+  .backlink {
+    font-family: var(--mono); font-size: 0.9rem; color: var(--ink-faint);
+    text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem;
+  }
+  .backlink:hover { color: var(--accent); }
+  .backlinks { display: flex; gap: 1.2rem; margin-bottom: 1.5rem; }
+
+  .kicker { font-family: var(--mono); font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.75rem; }
+  h1.title { font-size: clamp(1.9rem, 4vw, 2.3rem); line-height: 1.18; letter-spacing: -0.01em; }
+  .pitch { font-size: 1.1rem; color: var(--ink-dim); max-width: 46em; margin-top: 1rem; }
+
+  .section-head { display: flex; align-items: center; gap: 0.6rem; margin: 2.75rem 0 1.1rem; }
+  .section-head .num {
+    font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--accent-ink);
+    background: var(--accent); width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .section-head h2 { font-size: 1.3rem; }
+
+  section > p { font-size: 1.02rem; color: var(--ink-dim); max-width: 66ch; margin: 0 0 1rem; }
+
+  .board-table {
+    width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 1rem 0 1.5rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  }
+  .board-table th, .board-table td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--line); }
+  .board-table th {
+    font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500; background: var(--surface-2);
+  }
+  .board-table tr:last-child td { border-bottom: none; }
+  .board-table code { font-size: 0.88rem; }
+
+  .role { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 1.3rem 1.5rem; margin-bottom: 1.1rem; }
+  .role h3 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+  .role p { font-size: 0.98rem; color: var(--ink-dim); max-width: 66ch; margin: 0 0 0.8rem; }
+  .role p:last-of-type { margin-bottom: 0; }
+
+  pre.cli {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0.9rem 1.1rem; font-size: 0.92rem; overflow-x: auto; color: var(--ink); margin: 0.75rem 0;
+  }
+  pre.cli:last-child { margin-bottom: 0; }
+  pre.cli .c { color: var(--ink-faint); }
+  pre.cli .k { color: var(--accent); }
+
+  .note {
+    border-left: 3px solid var(--amber); background: var(--amber-bg); border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1rem; font-size: 0.93rem; color: var(--ink); margin: 0.9rem 0 0;
+  }
+  .note strong { color: var(--amber); }
+
+  footer {
+    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-size: 0.9rem; color: var(--ink-faint); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
+  }
+  footer a { color: var(--ink-dim); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="backlinks">
+    <a class="backlink" href="index.html">&larr; All paths</a>
+    <a class="backlink" href="trifecta.html">&larr; Trifecta overview</a>
+  </div>
+
+  <div class="kicker">MeshCore &middot; community fork &middot; espnow-ip-bridge</div>
+  <h1 class="title">Trifecta Repeater — setup &amp; config</h1>
+  <p class="pitch">
+    Assumes you've already decided this makes sense for your repeater. If
+    you're still deciding, see the <a href="trifecta.html">Trifecta overview</a> first.
+  </p>
+
+  <p>
+    Real-LoRa repeaters this runs on today: Heltec V3
+    (<code>Heltec_v3_repeater_bridge_espnow_ip</code>), Heltec V4
+    (<code>heltec_v4_repeater_bridge_espnow_ip</code>), and Xiao S3 WIO
+    (<code>Xiao_S3_WIO_repeater_bridge_espnow_ip</code>) — each also has an
+    <code>_debug</code> variant with full bridge/routing logging on, for
+    pairing with <code>watch_boards.py</code> below. Getting the right
+    environment onto your board (PlatformIO, a web flasher, whatever you
+    normally use) isn't covered here — this page picks up once you're
+    already running it.
+  </p>
+
+  <div class="section-head"><div class="num">1</div><h2>Configure whichever legs you need</h2></div>
+
+  <div class="role">
+    <h3>ESP-NOW bridge (for Sidecars to attach to)</h3>
+    <pre class="cli"><span class="k">set</span> bridge.channel &lt;selected wifi channel&gt;
+<span class="k">set</span> bridge.secret &lt;your key&gt;</pre>
+    <p>Whatever you set here is exactly what a Sidecar board needs configured to match — see the <a href="sidecar-setup.html">Sidecar setup page</a>.</p>
+  </div>
+
+  <div class="role">
+    <h3>IP bridge (to link to another Trifecta repeater)</h3>
+    <pre class="cli"><span class="k">set</span> wifi.ssid &lt;your ssid&gt;
+<span class="k">set</span> wifi.pwd &lt;your password&gt;
+<span class="k">set</span> ip.host &lt;peer host or IP&gt;   <span class="c"># set = dial out; empty = listen instead</span>
+<span class="k">set</span> ip.port &lt;port&gt;
+<span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># TLS-PSK, must match the peer exactly</span></pre>
+    <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel your WiFi access point actually operates on — it doesn't get synced automatically. Make sure that AP is locked to a fixed channel rather than left on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until you update <code>bridge.channel</code> to match again.</div>
+  </div>
+
+  <div class="section-head"><div class="num">2</div><h2>Verify it's actually working</h2></div>
+  <p>Don't just assume — these cover every hop:</p>
+  <pre class="cli"><span class="k">get</span> wifi.status
+<span class="k">get</span> bridge.channel
+<span class="k">get</span> ip.status
+<span class="k">neighbors.all</span></pre>
+  <p>
+    <code>wifi.status</code> confirms the board actually associated
+    (connected, IP, RSSI). <code>bridge.channel</code> shows the configured
+    ESP&#8209;NOW channel next to the radio's actual live channel and flags
+    it explicitly if they've drifted apart. <code>ip.status</code> reports
+    whether the TCP+TLS&#8209;PSK tunnel to the peer is currently up.
+    <code>neighbors.all</code> merges RF-heard and bridge-heard neighbours
+    into one list with a <code>via</code> column.
+  </p>
+
+  <div class="section-head"><div class="num">3</div><h2>Watch multiple boards at once</h2></div>
+  <pre class="cli"><span class="c">$</span> python3 watch_boards.py</pre>
+  <p>Auto-detects every connected board, connects to all of them, and streams debug output live in one terminal. Press <code>n</code> to dump <code>neighbors.all</code>, <code>b</code> for bridge status, <code>c</code> to toggle watching companion boards, from every connected board at once.</p>
+
+  <footer>
+    <span>A personal MeshCore fork, not an official project or release.</span>
+    <span style="display:flex;gap:1rem"><a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">Branch</a><a href="https://github.com/smellyspice/MeshCore/releases">Releases</a></span>
+  </footer>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sidecar — Setup</title>
+<meta name="description" content="Flash and configure a Sidecar companion, room server, or repeater against a Trifecta repeater.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg: #EEF1F0; --surface: #FFFFFF; --surface-2: #E4E9E7;
+    --ink: #16221F; --ink-dim: #3F4F4B; --ink-faint: #6B7A76;
+    --line: #D6DEDC; --accent: #0E7C7B; --accent-ink: #FFFFFF;
+    --amber: #A5650F; --amber-bg: #F6E9D6;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+      --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+      --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+      --amber: #E3A34B; --amber-bg: #2B2013;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+    --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+    --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+    --amber: #E3A34B; --amber-bg: #2B2013;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.65; font-size: 17px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  h1, h2, h3 { font-family: var(--mono); font-weight: 600; text-wrap: balance; color: var(--ink); margin: 0; }
+  code, pre, kbd { font-family: var(--mono); }
+
+  .page { max-width: 820px; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; }
+
+  .backlink {
+    font-family: var(--mono); font-size: 0.9rem; color: var(--ink-faint);
+    text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem;
+  }
+  .backlink:hover { color: var(--accent); }
+  .backlinks { display: flex; gap: 1.2rem; margin-bottom: 1.5rem; }
+
+  .kicker {
+    font-family: var(--mono); font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 0.75rem;
+  }
+  h1.title { font-size: clamp(1.9rem, 4vw, 2.3rem); line-height: 1.18; letter-spacing: -0.01em; }
+  .pitch { font-size: 1.1rem; color: var(--ink-dim); max-width: 46em; margin-top: 1rem; }
+
+  .section-head { display: flex; align-items: center; gap: 0.6rem; margin: 2.75rem 0 1.1rem; }
+  .section-head .num {
+    font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--accent-ink);
+    background: var(--accent); width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex: none;
+  }
+  .section-head h2 { font-size: 1.3rem; }
+
+  section > p { font-size: 1.02rem; color: var(--ink-dim); max-width: 66ch; margin: 0 0 1rem; }
+
+  .board-table {
+    width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 1rem 0 1.5rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  }
+  .board-table th, .board-table td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--line); }
+  .board-table th {
+    font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500; background: var(--surface-2);
+  }
+  .board-table tr:last-child td { border-bottom: none; }
+  .board-table code { font-size: 0.88rem; }
+
+  .role {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+    padding: 1.3rem 1.5rem; margin-bottom: 1.1rem;
+  }
+  .role h3 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+  .role p { font-size: 0.98rem; color: var(--ink-dim); max-width: 66ch; margin: 0 0 0.8rem; }
+  .role p:last-of-type { margin-bottom: 0; }
+
+  pre.cli {
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0.9rem 1.1rem; font-size: 0.92rem; overflow-x: auto; color: var(--ink); margin: 0.75rem 0;
+  }
+  pre.cli:last-child { margin-bottom: 0; }
+  pre.cli .c { color: var(--ink-faint); }
+  pre.cli .k { color: var(--accent); }
+
+  .note {
+    border-left: 3px solid var(--amber); background: var(--amber-bg); border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1rem; font-size: 0.93rem; color: var(--ink); margin: 0.9rem 0 0;
+  }
+  .note strong { color: var(--amber); }
+
+  footer {
+    margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+    font-size: 0.9rem; color: var(--ink-faint); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;
+  }
+  footer a { color: var(--ink-dim); }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="backlinks">
+    <a class="backlink" href="index.html">&larr; All paths</a>
+    <a class="backlink" href="sidecar.html">&larr; Sidecar overview</a>
+  </div>
+
+  <div class="kicker">MeshCore &middot; community fork &middot; espnow-ip-bridge</div>
+  <h1 class="title">Sidecar — setup &amp; config</h1>
+  <p class="pitch">
+    Assumes you already have a Trifecta repeater running and decided a
+    Sidecar makes sense for your setup. If you're still deciding, see the
+    <a href="sidecar.html">Sidecar overview</a> first.
+  </p>
+
+  <div class="section-head"><div class="num">1</div><h2>Configure the Trifecta repeater side</h2></div>
+  <p>On the repeater a Sidecar will attach to — set the ESP&#8209;NOW join parameters it'll need to match:</p>
+  <pre class="cli"><span class="k">set</span> bridge.channel &lt;selected wifi channel&gt;
+<span class="k">set</span> bridge.secret &lt;your key&gt;
+<span class="k">get</span> bridge.channel   <span class="c"># confirm + check for a live-channel mismatch</span>
+<span class="k">get</span> bridge.type      <span class="c"># confirms "espnow" (or "espnow+ip" if IP bridge also configured)</span></pre>
+  <p>If this Sidecar is a second repeater linking in over IP instead of ESP&#8209;NOW, also set:</p>
+  <pre class="cli"><span class="k">set</span> wifi.ssid &lt;name&gt;
+<span class="k">set</span> wifi.pwd &lt;password&gt;
+<span class="k">set</span> ip.host &lt;peer host or IP&gt;   <span class="c"># empty on this side = listen instead of dial out</span>
+<span class="k">set</span> ip.port &lt;port&gt;
+<span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># TLS-PSK, must match the peer</span></pre>
+  <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel your WiFi access point actually operates on — it doesn't get synced automatically. Lock that AP to a fixed channel rather than leaving it on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until <code>bridge.channel</code> is updated to match again.</div>
+
+  <p>
+    Works on the Waveshare ESP32-S3-Zero and the ESP32-C3 "Super Mini" —
+    same commands either way, only the environment name prefix changes
+    (<code>ESP32_S3_Zero_*</code> vs <code>ESP32_C3_SuperMini_*</code>):
+    <code>*_comp_radio_bridge_espnow_dual</code> for a companion,
+    <code>*_room_server_bridge_espnow</code> for a room server,
+    <code>*_repeater_bridge_espnow</code> for a repeater-role Sidecar.
+    Getting the environment onto your board isn't covered here — this page
+    picks up once you're already running it.
+  </p>
+
+  <div class="section-head"><div class="num">2</div><h2>Configure each role</h2></div>
+
+  <div class="role">
+    <h3>Companion</h3>
+    <p>No text CLI — companion firmware speaks the binary phone-app protocol on serial instead. Use the bundled script to join the ESP&#8209;NOW side before or after pairing with a phone app:</p>
+    <pre class="cli"><span class="k">python3</span> set_bridge_params.py list
+<span class="k">python3</span> set_bridge_params.py &lt;port&gt; get
+<span class="k">python3</span> set_bridge_params.py &lt;port&gt; set &lt;selected wifi channel&gt; &lt;your bridge secret&gt;</pre>
+    <p>Channel/secret must exactly match the repeater's own. Applies immediately, no reboot. Needs <code>pip install pyserial</code>. Everything else (contacts, channels, messaging) is normal companion-app usage from here.</p>
+  </div>
+
+  <div class="role">
+    <h3>Room server</h3>
+    <p>Real text CLI over USB. Same ESP&#8209;NOW join as above (<code>set bridge.channel</code>/<code>set bridge.secret</code>), then optionally add a channel mirror — see <a href="echo-board.html">Echo Board</a> for that piece specifically.</p>
+  </div>
+
+  <div class="role">
+    <h3>Repeater (linking in over ESP&#8209;NOW or IP)</h3>
+    <p>Real text CLI, bundles the IP bridge too — so it can simultaneously be an ESP&#8209;NOW Sidecar of one repeater and the far end of an IP link to another. Configure whichever side(s) apply using the commands in step 1, run on this board.</p>
+  </div>
+
+  <div class="section-head"><div class="num">3</div><h2>Verify it actually joined</h2></div>
+  <p>Don't just assume it's working — these cover every hop:</p>
+  <pre class="cli"><span class="k">get</span> wifi.status
+<span class="k">get</span> bridge.channel
+<span class="k">get</span> ip.status
+<span class="k">neighbors.all</span></pre>
+  <p><code>bridge.channel</code> flags a mismatch explicitly if the ESP-NOW radio's live channel has drifted from what's configured. <code>neighbors.all</code> merges RF-heard and bridge-heard neighbours into one list with a <code>via</code> column, so you can see which peers are reachable and through which path.</p>
+
+  <footer>
+    <span>A personal MeshCore fork, not an official project or release.</span>
+    <span style="display:flex;gap:1rem"><a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">Branch</a><a href="https://github.com/smellyspice/MeshCore/releases">Releases</a></span>
+  </footer>
+
+</div>
+
+</body>
+</html>

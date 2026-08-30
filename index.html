@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trifecta Bridge</title>
-<meta name="description" content="Recruiting doc for MeshCore's Trifecta LoRa/ESP-NOW/IP bridge fork — use cases, security posture, and limitations for beta testers.">
+<title>MeshCore, Extended</title>
+<meta name="description" content="A MeshCore fork extending mesh reach over ESP-NOW and IP alongside real LoRa — pick the piece that matches what you already have.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 
@@ -14,8 +14,8 @@
     --surface: #FFFFFF;
     --surface-2: #E4E9E7;
     --ink: #16221F;
-    --ink-dim: #4B5D59;
-    --ink-faint: #7C8B87;
+    --ink-dim: #3F4F4B;
+    --ink-faint: #6B7A76;
     --line: #D6DEDC;
     --accent: #0E7C7B;
     --accent-ink: #FFFFFF;
@@ -27,31 +27,17 @@
 
   :root:not([data-theme="light"]) {
     @media (prefers-color-scheme: dark) {
-      --bg: #0E1613;
-      --surface: #16211D;
-      --surface-2: #1E2A25;
-      --ink: #E7EFEC;
-      --ink-dim: #93A39D;
-      --ink-faint: #647A73;
-      --line: #263631;
-      --accent: #4FD1C8;
-      --accent-ink: #0B1614;
-      --amber: #E3A34B;
-      --amber-bg: #2B2013;
+      --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+      --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+      --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+      --amber: #E3A34B; --amber-bg: #2B2013;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #0E1613;
-    --surface: #16211D;
-    --surface-2: #1E2A25;
-    --ink: #E7EFEC;
-    --ink-dim: #93A39D;
-    --ink-faint: #647A73;
-    --line: #263631;
-    --accent: #4FD1C8;
-    --accent-ink: #0B1614;
-    --amber: #E3A34B;
-    --amber-bg: #2B2013;
+    --bg: #0E1613; --surface: #16211D; --surface-2: #1E2A25;
+    --ink: #D2DBD7; --ink-dim: #A7B6B0; --ink-faint: #7C918A;
+    --line: #263631; --accent: #4FD1C8; --accent-ink: #0B1614;
+    --amber: #E3A34B; --amber-bg: #2B2013;
   }
 
   * { box-sizing: border-box; }
@@ -62,8 +48,8 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--sans);
-    line-height: 1.6;
-    font-size: 16px;
+    line-height: 1.65;
+    font-size: 17px;
   }
 
   ::selection { background: var(--accent); color: var(--accent-ink); }
@@ -81,51 +67,18 @@
     margin: 0;
   }
 
-  code, pre, kbd {
-    font-family: var(--mono);
-  }
+  code, pre, kbd { font-family: var(--mono); }
 
   .page {
-    max-width: 760px;
+    max-width: 820px;
     margin: 0 auto;
-    padding: 4rem 1.5rem 6rem;
-    position: relative;
+    padding: 3.5rem 1.5rem 5rem;
   }
 
-  /* ---------- signal rail ---------- */
-  .rail {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 1.5rem;
-    display: none;
-  }
-  @media (min-width: 900px) {
-    .page { padding-left: 2.5rem; }
-    .rail { display: block; left: -0.5rem; }
-  }
-  .rail::before {
-    content: "";
-    position: absolute;
-    left: 3px; top: 6.5rem; bottom: 4rem;
-    width: 1px;
-    background: var(--line);
-  }
-  .rail .node {
-    position: absolute;
-    left: 0;
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--bg);
-    border: 1px solid var(--accent);
-  }
-
-  /* ---------- header ---------- */
   .kicker {
     font-family: var(--mono);
-    font-size: 0.8rem;
-    letter-spacing: 0.09em;
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--accent);
     margin-bottom: 0.75rem;
@@ -142,8 +95,8 @@
   }
 
   h1.title {
-    font-size: clamp(2.1rem, 5vw, 2.9rem);
-    line-height: 1.08;
+    font-size: clamp(2rem, 4.5vw, 2.5rem);
+    line-height: 1.18;
     letter-spacing: -0.01em;
   }
 
@@ -151,19 +104,14 @@
     font-size: 1.15rem;
     color: var(--ink-dim);
     max-width: 46em;
-    margin-top: 1rem;
+    margin-top: 1.1rem;
   }
 
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 1.5rem;
-  }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.5rem; }
   .chip {
     font-family: var(--mono);
-    font-size: 0.78rem;
-    padding: 0.3rem 0.65rem;
+    font-size: 0.88rem;
+    padding: 0.35rem 0.75rem;
     border: 1px solid var(--line);
     border-radius: 999px;
     color: var(--ink-dim);
@@ -171,255 +119,69 @@
   }
   .chip.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
 
-  /* ---------- quick links ---------- */
-  .quicklinks {
+  .section-head {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 0.6rem;
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--line);
+    margin: 3rem 0 1.25rem;
   }
-  .quicklinks a {
-    font-family: var(--mono);
-    font-size: 0.82rem;
-    color: var(--ink);
+  .section-head .diamond { width: 9px; height: 9px; background: var(--accent); transform: rotate(45deg); flex: none; }
+  .section-head h2 {
+    font-size: 1.4rem;
+    letter-spacing: -0.005em;
+  }
+
+  .why-grid { display: grid; grid-template-columns: 1fr; gap: 1.1rem; margin-bottom: 0.5rem; }
+  @media (min-width: 640px) { .why-grid { grid-template-columns: 1fr 1fr; } }
+  .why h3 { font-size: 1.08rem; margin-bottom: 0.45rem; }
+  .why p { font-size: 1.02rem; color: var(--ink-dim); margin: 0; max-width: 46ch; }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  .grid .full { grid-column: 1 / -1; }
+  @media (min-width: 640px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .path {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    padding: 1.6rem;
     text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem 0.9rem;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--surface);
-    transition: border-color 0.15s ease, color 0.15s ease;
+    color: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .quicklinks a:hover { border-color: var(--accent); color: var(--accent); }
-  .quicklinks a .arrow { color: var(--ink-faint); }
-  .quicklinks a:hover .arrow { color: var(--accent); }
+  .path:hover { border-color: var(--accent); box-shadow: 0 2px 12px rgba(0,0,0,0.05); }
+  .path-badge {
+    width: 3.2rem; height: 3.2rem;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+    display: flex; align-items: center; justify-content: center;
+  }
+  .path-badge svg { width: 1.6rem; height: 1.6rem; stroke: var(--accent); fill: none; stroke-width: 1.8; }
+  .path-name { font-family: var(--mono); font-weight: 600; font-size: 1.3rem; }
+  .path-fit { font-size: 1rem; color: var(--ink-faint); }
+  .path-desc { font-size: 1.05rem; color: var(--ink-dim); margin: 0; max-width: 62ch; }
+  .path-go { margin-top: auto; font-family: var(--mono); font-size: 0.92rem; color: var(--accent); }
 
-  /* ---------- dividers ---------- */
-  .divider {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin: 3.25rem 0 1.75rem;
-    color: var(--ink-faint);
-    scroll-margin-top: 1.5rem;
-  }
-  .divider .diamond {
-    width: 7px; height: 7px;
-    background: var(--accent);
-    transform: rotate(45deg);
-    flex: none;
-  }
-  .divider .rule { flex: 1; height: 1px; background: var(--line); }
-  .divider .label {
-    font-family: var(--mono);
-    font-size: 0.78rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  section > h2 { font-size: 1.5rem; margin-bottom: 1rem; }
-  section p { margin: 0 0 1rem; max-width: 62ch; }
-  section p:last-child { margin-bottom: 0; }
-
-  .lede {
-    font-size: 1.05rem;
-    color: var(--ink-dim);
-  }
-
-  /* ---------- status table ---------- */
-  .status-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.92rem;
-    margin: 1.25rem 0;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .status-table th, .status-table td {
-    text-align: left;
-    padding: 0.65rem 0.9rem;
-    border-bottom: 1px solid var(--line);
-  }
-  .status-table th {
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    font-weight: 500;
-    background: var(--surface-2);
-  }
-  .status-table tr:last-child td { border-bottom: none; }
-  .tag {
-    font-family: var(--mono);
-    font-size: 0.75rem;
-    padding: 0.15rem 0.5rem;
-    border-radius: 4px;
-    white-space: nowrap;
-  }
-  .tag.existing { color: var(--ink-dim); background: var(--surface-2); }
-  .tag.new { color: var(--accent-ink); background: var(--accent); }
-
-  /* ---------- diagram ---------- */
-  .diagram {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 1.25rem 1.5rem;
-    overflow-x: auto;
-    margin: 1.5rem 0;
-  }
-  .diagram pre {
-    margin: 0;
-    font-size: 0.82rem;
-    line-height: 1.55;
-    color: var(--ink-dim);
-    white-space: pre;
-  }
-  .diagram pre .hl { color: var(--accent); }
-  .diagram .cap {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    margin-top: 0.9rem;
-  }
-
-  /* ---------- use cases ---------- */
-  .usecase {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--surface);
-    padding: 1.4rem 1.5rem;
-    margin-bottom: 1.1rem;
-  }
-  .usecase-head {
-    display: flex;
-    align-items: baseline;
-    gap: 0.7rem;
-    margin-bottom: 0.6rem;
-  }
-  .usecase-num {
-    font-family: var(--mono);
-    color: var(--ink-faint);
-    font-size: 0.85rem;
-  }
-  .usecase h3 { font-size: 1.08rem; }
-  .usecase-diagram {
-    font-family: var(--mono);
-    font-size: 0.78rem;
-    color: var(--ink-dim);
-    background: var(--surface-2);
-    border-radius: 6px;
-    padding: 0.6rem 0.8rem;
-    margin: 0.8rem 0 0.7rem;
-    overflow-x: auto;
-    white-space: pre;
-  }
-  .usecase-diagram .hl { color: var(--accent); }
-
-  /* ---------- callout ---------- */
   .callout {
     border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
     background: color-mix(in srgb, var(--accent) 7%, var(--surface));
-    border-radius: 8px;
-    padding: 1.25rem 1.5rem;
-    margin: 1.5rem 0;
+    border-radius: 10px;
+    padding: 1.4rem 1.6rem;
+    margin: 1.5rem 0 0;
   }
-  .callout h3 {
-    font-size: 0.95rem;
-    color: var(--accent);
-    margin-bottom: 0.6rem;
-  }
-  .callout p { max-width: none; font-size: 0.95rem; }
-  .callout ul { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.95rem; }
-  .callout li { margin-bottom: 0.35rem; }
-  .callout li:last-child { margin-bottom: 0; }
-  section > ul { margin: 1.25rem 0; padding-left: 1.2rem; }
-  section > ul li { margin-bottom: 0.7rem; line-height: 1.55; }
-  section > ul li:last-child { margin-bottom: 0; }
-
-  /* ---------- limitations ---------- */
-  .limit {
-    display: flex;
-    gap: 0.9rem;
-    padding: 1rem 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .limit:last-child { border-bottom: none; }
-  .limit-mark {
-    flex: none;
-    min-width: 2.1rem;
-    height: 1.6rem;
-    padding: 0 0.35rem;
-    border-radius: 5px;
-    background: var(--amber-bg);
-    color: var(--amber);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.02em;
-    margin-top: 0.1rem;
-  }
-  .limit-body h3 {
-    font-size: 0.98rem;
-    font-family: var(--sans);
-    font-weight: 600;
-    margin-bottom: 0.25rem;
-  }
-  .limit-body p { font-size: 0.93rem; color: var(--ink-dim); max-width: 60ch; }
-
-  /* ---------- involvement ---------- */
-  .wave {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.4rem 1rem;
-    padding: 1.25rem 1.5rem;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--surface);
-    margin-bottom: 1rem;
-  }
-  .wave-tag {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--accent);
-    grid-column: 1 / -1;
-  }
-  .wave h3 { grid-column: 1 / -1; font-size: 1.05rem; margin-top: 0.15rem; }
-  .wave p { grid-column: 1 / -1; margin: 0; font-size: 0.93rem; color: var(--ink-dim); }
-  .wave code { font-size: 0.85rem; }
-
-  pre.cli {
-    background: var(--surface-2);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 0.9rem 1.1rem;
-    font-size: 0.83rem;
-    overflow-x: auto;
-    color: var(--ink);
-    margin: 0.75rem 0 0;
-  }
-  pre.cli .c { color: var(--ink-faint); }
-  pre.cli .k { color: var(--accent); }
+  .callout h3 { font-size: 1rem; color: var(--accent); margin-bottom: 0.6rem; }
+  .callout p { max-width: none; font-size: 0.98rem; margin: 0; color: var(--ink-dim); }
 
   footer {
-    margin-top: 4rem;
+    margin-top: 3.5rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--line);
-    font-size: 0.85rem;
+    font-size: 0.88rem;
     color: var(--ink-faint);
     display: flex;
     justify-content: space-between;
@@ -432,433 +194,106 @@
 <body>
 
 <div class="page">
-  <div class="rail" aria-hidden="true">
-    <div class="node" style="top: 6.5rem;"></div>
-    <div class="node" style="top: 22%;"></div>
-    <div class="node" style="top: 42%;"></div>
-    <div class="node" style="top: 62%;"></div>
-    <div class="node" style="top: 80%;"></div>
-  </div>
 
   <header>
     <div class="kicker">MeshCore &middot; community fork &middot; espnow-ip-bridge</div>
-    <h1 class="title">Trifecta Bridge</h1>
+    <h1 class="title">Extend your mesh without new radios</h1>
     <p class="pitch">
-      One repeater, three legs at once — real LoRa, an ESP&#8209;NOW side&#8209;channel,
-      and a new encrypted IP bridge — so companions and other repeaters can
-      reach your mesh without all fighting over the same airtime.
+      Getting a repeater mounted somewhere with real coverage is the hard
+      part of running a mesh. This fork lets everything else attach to that
+      one repeater — companions, room servers, even other repeaters — over
+      WiFi and ESP&#8209;NOW instead of another LoRa hop, without giving up
+      the airtime discipline the mesh depends on.
     </p>
     <div class="chips">
       <span class="chip">ESP32 only</span>
-      <span class="chip">Opt-in, per bridge</span>
-      <span class="chip">Real DTLS on the IP hop</span>
+      <span class="chip">Opt-in, per feature</span>
       <span class="chip warn">Unmerged personal fork — beta</span>
     </div>
-    <nav class="quicklinks">
-      <a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge"><span class="arrow">&#8599;</span> Branch</a>
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8"><span class="arrow">&#8599;</span> Firmware</a>
-      <a href="#use-cases"><span class="arrow">&#8595;</span> Use cases</a>
-    </nav>
   </header>
 
-  <div class="diagram" style="margin-top: 2.25rem;">
-<pre>          local LoRa mesh
-                 |
-                 v
-    +-------------------------+
-    |    Trifecta repeater    |<span class="hl">----ESP-NOW---&gt;</span>  companion
-    |    (real LoRa radio)    |                  (no LoRa radio)
-    +------------+------------+
-                 |
-          <span class="hl">IP bridge, DTLS</span>
-                 |
-                 v
-   another Trifecta repeater -- anywhere
-   with WiFi and a route back to it</pre>
-    <div class="cap">the shape this branch adds</div>
+  <div class="section-head"><div class="diamond"></div><h2>Why bother with any of this</h2></div>
+
+  <div class="why-grid">
+    <div class="why">
+      <h3>Basements block RF, WiFi doesn't care</h3>
+      <p>A repeater in a basement or a steel-frame building may never reach the mesh over LoRa at all — but if it has WiFi, it can still fully participate.</p>
+    </div>
+    <div class="why">
+      <h3>Don't burn LoRa airtime for ten feet</h3>
+      <p>A companion sitting right next to its own repeater doesn't need a real LoRa hop just to say hello. That's airtime and duty-cycle budget better spent reaching further.</p>
+    </div>
+    <div class="why">
+      <h3>Fewer radios, same mesh</h3>
+      <p>A companion or room server with no second LoRa radio at all can still join in fully, at a fraction of the hardware cost.</p>
+    </div>
+    <div class="why">
+      <h3>RF still comes first</h3>
+      <p>None of this replaces LoRa. Where a real RF path exists, it's still preferred — this is about reaching where LoRa can't, or shouldn't have to.</p>
+    </div>
   </div>
 
-  <div class="divider"><div class="diamond"></div><div class="label">what's actually new</div><div class="rule"></div></div>
+  <div class="section-head"><div class="diamond"></div><h2>Pick what matches your setup</h2></div>
 
-  <section>
-    <p class="lede">
-      MeshCore already has an ESP&#8209;NOW repeater&#8209;to&#8209;repeater bridge. This
-      branch doesn't reinvent that — it adds the three pieces that make a
-      Trifecta node possible, plus a new way for a companion to skip LoRa
-      entirely.
-    </p>
-    <table class="status-table">
-      <tr><th>Piece</th><th>Status</th></tr>
-      <tr><td>ESP&#8209;NOW bridge, repeater&nbsp;&harr;&nbsp;repeater</td><td><span class="tag existing">already in MeshCore</span></td></tr>
-      <tr><td>IP bridge — WiFi + DTLS, repeater&nbsp;&harr;&nbsp;repeater or site&nbsp;&harr;&nbsp;site over any IP network</td><td><span class="tag new">new, this branch</span></td></tr>
-      <tr><td>Running multiple bridges at once on one repeater ("Trifecta")</td><td><span class="tag new">new, this branch</span></td></tr>
-      <tr><td>Companion with <em>no</em> LoRa radio, joining purely over ESP&#8209;NOW</td><td><span class="tag new">new, this branch</span></td></tr>
-    </table>
-    <p>
-      That last one is the one worth pausing on: a companion board like a
-      Waveshare ESP32&#8209;S3&#8209;Zero can join a Trifecta repeater's ESP&#8209;NOW
-      side&#8209;channel <em>as its primary radio</em> — no LoRa chip, no LoRa
-      airtime used, no LoRa collisions contributed. It just shows up as
-      another node on the mesh.
-    </p>
-  </section>
-
-  <div class="divider" id="use-cases"><div class="diamond"></div><div class="label">use cases</div><div class="rule"></div></div>
-
-  <section>
-    <div class="usecase">
-      <div class="usecase-head"><span class="usecase-num">01</span><h3>Keep small devices off LoRa entirely</h3></div>
-      <p>
-        A well-placed repeater handles the real LoRa mesh; nearby companions
-        that don't need LoRa range — a desk node, a phone-adjacent client, a
-        sensor — join over ESP&#8209;NOW instead. They stop consuming LoRa
-        airtime and stop contributing to collisions, without losing mesh
-        connectivity.
-      </p>
-      <div class="usecase-diagram">companion (no LoRa) <span class="hl">--ESP-NOW--&gt;</span> Trifecta repeater <span class="hl">--LoRa--&gt;</span> rest of mesh</div>
-    </div>
-
-    <div class="usecase">
-      <div class="usecase-head"><span class="usecase-num">02</span><h3>Get the repeater itself deep into a building</h3></div>
-      <p>
-        This one isn't about getting companions off LoRa — it's about the
-        repeater's own backhaul. Place a Trifecta repeater wherever WiFi or
-        ethernet reaches, even somewhere LoRa can't escape the structure, and
-        let it bridge back to the outside mesh over IP. Companions inside the
-        building still reach it the normal way — LoRa (fine at indoor range)
-        or ESP&#8209;NOW.
-      </p>
-      <div class="usecase-diagram">indoor Trifecta repeater <span class="hl">--IP/WiFi--&gt;</span> outside repeater <span class="hl">--LoRa--&gt;</span> rest of mesh
-   &uarr; local companions join here over LoRa or ESP-NOW as usual</div>
-    </div>
-
-    <div class="usecase">
-      <div class="usecase-head"><span class="usecase-num">03</span><h3>Seed a greenfield deployment</h3></div>
-      <p>
-        Drop a repeater into an area with no LoRa neighbours yet. It can't
-        reach the main net on its own — but it can bridge to another
-        Trifecta repeater over another available IP link right away, so it's
-        useful from day one. As more local repeaters go up around it and
-        start hearing each other over real LoRa, the IP link quietly
-        becomes redundant instead of load-bearing.
-      </p>
-      <div class="usecase-diagram">new area, no LoRa neighbours yet
-  seed repeater <span class="hl">--IP link--&gt;</span> established Trifecta repeater
-  (later: local repeaters link up over LoRa; the IP hop becomes optional)</div>
-    </div>
-
-    <div class="usecase">
-      <div class="usecase-head"><span class="usecase-num">04</span><h3>Link sites without touching any outside IP network</h3></div>
-      <p>
-        Same IP bridge, entirely different transport: an organization with
-        two buildings can link them over a private LAN or VPN, or over
-        their own point&#8209;to&#8209;point radio (microwave, 60&nbsp;GHz, whatever
-        they've already got) — no port forwarding, no outside IP network
-        exposure at all, just one unified mesh across sites.
-      </p>
-      <div class="usecase-diagram">building A Trifecta repeater <span class="hl">--IP link--&gt;</span> building B Trifecta repeater</div>
-    </div>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">on trusting what's on the other end of an IP link</div><div class="rule"></div></div>
-
-  <section>
-    <p>
-      Most of the use cases above don't touch any outside IP network at all —
-      but for the ones that do, it's worth stating plainly, since it's a
-      natural first question.
-    </p>
-    <div class="callout">
-      <h3>It's an intentional point-to-point link, not a public portal</h3>
-      <ul>
-        <li>Nothing changes for a LoRa-only node. The bridge only exists on repeaters that explicitly enable it.</li>
-        <li>The IP hop is authenticated and encrypted with real DTLS — the same audited TLS machinery (mbedTLS) HTTPS runs on, over UDP, using a pre-shared key.</li>
-        <li>It's exactly two fixed peers per link. There's no mode where it accepts connections from anyone who doesn't already have the key.</li>
-      </ul>
-    </div>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">limitations</div><div class="rule"></div></div>
-
-  <section>
-    <div class="limit">
-      <div class="limit-mark">32</div>
-      <div class="limit-body">
-        <h3>ESP32 boards only</h3>
-        <p>Both ESP&#8209;NOW and the IP bridge (WiFi + mbedTLS) are Espressif-specific. Nothing here touches nRF52, RP2040, or STM32 boards.</p>
+  <div class="grid">
+    <a class="path full" href="trifecta.html">
+      <div class="path-badge">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="6" r="1.3" fill="var(--accent)" stroke="none"/>
+          <path d="M12 7.3V19"/>
+          <path d="M8 19h8"/>
+          <path d="M9 3.5a4.2 4.2 0 000 5"/>
+          <path d="M15 3.5a4.2 4.2 0 010 5"/>
+          <path d="M6.5 1.5a7.5 7.5 0 000 9"/>
+          <path d="M17.5 1.5a7.5 7.5 0 010 9"/>
+        </svg>
       </div>
-    </div>
-    <div class="limit">
-      <div class="limit-mark">RF</div>
-      <div class="limit-body">
-        <h3>ESP-NOW and WiFi share one radio, one fixed channel</h3>
-        <p>On a Trifecta repeater, ESP&#8209;NOW and the IP bridge's WiFi connection have to agree on one static channel — no auto-hopping APs. We've run this combination successfully in our own testing, but haven't stress-tested it across a wide range of routers yet.</p>
+      <div class="path-name">Trifecta Repeater</div>
+      <div class="path-fit">You run (or want to run) a real LoRa repeater</div>
+      <p class="path-desc">
+        One repeater, three legs at once — real LoRa, an ESP&#8209;NOW
+        side-channel, and an encrypted IP bridge — so the things below can
+        attach to it. Start here if you don't have a repeater running this
+        yet.
+      </p>
+      <div class="path-go">Details &rarr;</div>
+    </a>
+
+    <a class="path" href="sidecar.html">
+      <div class="path-badge">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1.5 1.5M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1.5-1.5"/></svg>
       </div>
-    </div>
-    <div class="limit">
-      <div class="limit-mark">NAT</div>
-      <div class="limit-body">
-        <h3>Port forwarding — but only on one side</h3>
-        <p>Only the server side of an IP bridge link needs one UDP port forwarded. The other side dials out and works behind any standard NAT with zero config. If your server-side ISP uses CGNAT, port forwarding won't be possible there — you'd need a small VPS or similar instead.</p>
+      <div class="path-name">Sidecar</div>
+      <div class="path-fit">You have a Trifecta repeater and want another node attached to it</div>
+      <p class="path-desc">
+        A companion, room server, or second repeater that tethers to your
+        Trifecta repeater over ESP&#8209;NOW or IP — no second LoRa radio
+        to buy, no LoRa hop wasted just to cross a basement ceiling or an
+        office floor.
+      </p>
+      <div class="path-go">Details &rarr;</div>
+    </a>
+
+    <a class="path" href="echo-board.html">
+      <div class="path-badge">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg>
       </div>
-    </div>
-    <div class="limit">
-      <div class="limit-mark">git</div>
-      <div class="limit-body">
-        <h3>This is a personal fork, not upstream MeshCore</h3>
-        <p>Nothing here has been merged or reviewed by the MeshCore maintainers. It's beta-stage, tested so far on Xiao S3 WIO and Heltec V3/V4, and there are still open validation items in the design notes. The plan is to open a PR against upstream MeshCore once it's had enough real-world testing and validation to be worth proposing — that's exactly what this round of testing is for. In the meantime, treat every release here as a developer build for people willing to help shake it out — not something to put on a mesh anyone (including a future you) actually depends on. MeshCore itself is a volunteer, amateur-run project; this fork is several steps rawer than that.</p>
-      </div>
-    </div>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 2</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware only this round (Xiao S3 WIO, Heltec V3, Heltec V4
-      &mdash; V4 wasn't flashed to real hardware for this round, but shares
-      the exact same radio driver and only touches shared, board-agnostic
-      code, so it's included on that basis). No-LoRa companion assets are
-      unchanged, still on the
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
-    </p>
-    <ul>
-      <li><strong>Fixed</strong> &mdash; a repeater no longer keys its LoRa radio for traffic that's only reachable over a bridge. Previously any reply or relayed message always broadcast over local RF <em>and</em> mirrored to the bridge, even when the destination had no radio at all (e.g. a companion reachable only through an ESP&#8209;NOW/IP bridge chain). Covers both replies a repeater composes itself and ordinary message relaying through it — always falls back to broadcasting both ways whenever it isn't confidently sure, so this never risks silent delivery failures.</li>
-      <li><strong>Fixed</strong> &mdash; a routing edge case where an internal "this came from a bridge" flag could, in rare timing windows, misapply to an unrelated later packet. Found and fixed during beta testing.</li>
-      <li><strong>New</strong> &mdash; <code>neighbors.all</code> CLI command, merging RF-heard and bridge-heard neighbours into one list with a <code>via</code> column, without changing the existing <code>neighbors</code> command's output.</li>
-      <li><strong>New</strong> &mdash; an IP-bridge path-return delay: when a repeater has a live RF neighbour, it briefly holds back mirroring a learned-path packet over the IP bridge, giving a genuine RF path a head start instead of letting the IP link win a route race it shouldn't.</li>
-      <li><strong>New</strong> &mdash; NTP-based clock sync for boards with no battery-backed RTC.</li>
-      <li><strong>New tool</strong> &mdash; <code>watch_boards.py</code>, attached to this release: auto-connects to every attached board's serial port at once and streams live, color-coded, multi-board debug output in one terminal, with payload-type annotation, advert name/coordinate decoding, and the routing decisions above highlighted in their own colors. This release ships with debug logging left on specifically so this tool has something to show.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 3</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware only, same three boards as beta 2. No-LoRa companion
-      assets are unchanged, still on the
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
-    </p>
-    <ul>
-      <li><strong>Fixed</strong> &mdash; a repeater's own broadcast traffic (adverts, flood replies) could get misrouted to a single bridge instead of reaching everyone. The heuristic that redirects a genuine <em>reply</em> straight back out the bridge it arrived from was also catching FLOOD-route sends and zero-hop self-adverts, both of which are meant to reach everyone, not bounce back to one peer. Found live: a repeater's own self-advert would silently fail to reach a peer repeater over the bridge whenever it happened to fire shortly after any unrelated bridge traffic. Fixed for both cases — always falls back to broadcasting to everyone whenever it isn't confidently a genuine reply.</li>
-      <li><strong>New</strong> &mdash; the RF-preference delay from beta 2 (previously scoped to just the path-return reply) now covers first contact too: the first request, response, text message, or admin login between two new peers. Before this, first contact between two nodes had no RF-preference protection at all — the IP bridge could win the race for the very first exchange and get baked permanently into the learned route, even when a working RF path existed.</li>
-      <li><strong>New</strong> &mdash; that delay now skips entirely when the destination is already confidently known to be reachable only over a bridge (e.g. an ESP&#8209;NOW-only companion with no LoRa radio at all), so the two main use cases for this feature aren't taxed with pointless latency.</li>
-      <li><strong>Changed</strong> &mdash; bridge-neighbour tracking now recognizes companions, not just other repeaters, which the fix above needs to actually detect a bridge-only companion as bridge-only. The stock, RF-only <code>neighbors</code> CLI table is unchanged. Table size now matches the RF-neighbour table instead of a fixed cap of 8.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 4</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware only, same three boards. No-LoRa companion assets
-      are unchanged, still on the
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
-    </p>
-    <ul>
-      <li><strong>Much better delivery reliability</strong> &mdash; for ESP&#8209;NOW-only companions (e.g. the LoRa-less S3-Zero) with a marginal RF link to their paired repeater. Root-caused via live timing instrumentation: at normal desk range, some exchanges needed several retries to get a MAC-layer ACK back &mdash; a real RF margin issue, not a routing bug. The ESP-NOW send retry ceiling is raised from 4 to 12 attempts (with a matching timeout budget); each retry is cheap (~15&ndash;20ms), so a slower success now replaces what used to be a visible timeout error.</li>
-      <li><strong>Fixed</strong> &mdash; the IP bridge's DTLS handshake could hang forever if the peer disappeared mid-handshake (network switch, IP address change), requiring a manual reboot to recover. Now times out after 30s and retries automatically, same as any other connection failure.</li>
-      <li><strong>New</strong> &mdash; the IP bridge's heartbeat ping now defers by a tick when the ESP-NOW bridge has been active recently, on dual-bridge boards &mdash; avoids the heartbeat competing with an inbound ESP-NOW frame's ACK timing for the shared radio.</li>
-      <li><strong>New</strong> &mdash; <code>get bridge.channel</code> now shows the radio's actual live WiFi channel alongside the configured value, flagging a mismatch explicitly.</li>
-      <li><strong><code>watch_boards.py</code></strong> &mdash; new <code>b</code> hotkey dumps bridge status (WiFi/IP status, live channel) from every connected board at once; new <code>c</code> hotkey toggles watching companion boards too (skipped by default, since they speak a different protocol).</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 5</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware only, same three boards. No-LoRa companion assets
-      are unchanged, still on the
-      <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta1">beta 1 release</a>.
-    </p>
-    <ul>
-      <li><strong>Changed</strong> &mdash; the IP bridge now runs over TCP+TLS-PSK instead of UDP+DTLS-PSK. UDP gave no delivery guarantee: a dropped datagram on the IP hop was silently invisible on both ends, indistinguishable from a failure anywhere else. TCP's own retransmit/ordering now covers that. The client-side connect is done with a manual non-blocking <code>socket()</code>/<code>connect()</code>, since mbedTLS has no non-blocking TCP variant &mdash; keeps the bridge's synchronous, single-threaded design intact, no new task added.</li>
-      <li><strong>New</strong> &mdash; a new incoming connection can no longer preempt an active session just by connecting. It now has to complete its own TLS-PSK handshake, proving it holds the real shared secret, before it's allowed to replace the current peer. This also fixes a real issue found during testing: previously, if a peer's IP changed, the other side needed a manual reboot to accept the new connection; now a legitimately reconnecting peer gets back in automatically once it re-authenticates.</li>
-      <li><strong>New</strong> &mdash; TCP-level keepalive (30s idle, 10s probe interval, 3 probes) as a backstop alongside the existing app-level ping/pong heartbeat.</li>
-      <li><strong>Deployment note</strong> &mdash; if you reach a repeater through port-forwarding/DDNS for the IP bridge, the forwarded port now needs to allow TCP, not just UDP.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 8</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      A new feature (ESP-NOW boards syncing time off a repeater automatically),
-      plus the ESP32-C3 "Super Mini" going from an untested spec to confirmed
-      working on real hardware &mdash; and a real bug found in getting there.
-    </p>
-    <ul>
-      <li><strong>New</strong> &mdash; ESP-NOW time-sync beacon. A repeater running both the ESP-NOW and IP bridges together already has real NTP time; it now broadcasts that time to its ESP-NOW segment every 5 minutes, authenticated purely by the shared <code>bridge.secret</code>. Any no-LoRa ESP-NOW board (companion, repeater-role, or room server) picks it up and sets its own clock, once per 12-hour cooldown so a steady stream of beacons only actually moves the clock about twice a day. No CLI action needed on either side.</li>
-      <li><strong>Confirmed on real hardware</strong> &mdash; the ESP32-C3 "Super Mini" (companion/repeater/room-server roles), first shipped as an untested spec in beta 7. Found and fixed a real bug along the way: the generic PlatformIO board definition for this chip doesn't enable native USB CDC the way the S3-Zero's does, so the serial CLI was completely silent on a fresh board even though flashing itself worked fine.</li>
-      <li><strong>Changed</strong> &mdash; the room server's channel-bridge command renamed <code>room.channel &lt;name&gt; &lt;psk&gt;</code> &rarr; <code>set room.channel &lt;name&gt; &lt;psk&gt;</code>, for consistency with the rest of the CLI's <code>set</code>/<code>get</code> convention.</li>
-      <li><strong>Fixed</strong> &mdash; the ESP-NOW bridge's repeater&rarr;client retry ceiling raised 3&rarr;12, matching the client&rarr;repeater direction's existing ceiling. Both directions cross the same physical, sometimes-marginal link &mdash; there was no reason retries should help only one of them.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 7</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware, the companion, and a new room-server build &mdash;
-      the no-LoRa companion's own binary is different this round too, not
-      just repeaters, since two of the fixes below live in radio/bridge code
-      the companion shares.
-    </p>
-    <ul>
-      <li><strong>New</strong> &mdash; a <code>simple_room_server</code> build for the no-LoRa Waveshare S3-Zero, joining a repeater's ESP-NOW bridge the same way the companion does. New env: <code>ESP32_S3_Zero_room_server_bridge_espnow</code>.</li>
-      <li><strong>New</strong> &mdash; that room server can passively listen on one public group channel and feed its text messages straight into the room's post feed &mdash; <code>set room.channel &lt;name&gt; &lt;psk&gt;</code> (accepts hex or base64), <code>get room.channel</code> to read it back. Deliberately one channel per board, not several.</li>
-      <li><strong>Fixed</strong> &mdash; a genuinely unconfigured ESP-NOW-bridge board (companion, repeater, or room server) boot-looped. The mesh auto-sends a self-advert on boot regardless of whether the ESP-NOW radio has been configured yet; the send path divided by the configured secret's length, which is zero pre-configuration &mdash; instant crash, every boot, on any board that hadn't been set up yet.</li>
-      <li><strong>Fixed</strong> &mdash; a board joined to a repeater's ESP-NOW bridge could never receive anything relayed back out that same bridge to reach a different peer on it. A shared dedup table meant a packet arriving over ESP-NOW was already marked "seen" by the time the repeater tried to mirror it back out to another ESP-NOW peer &mdash; silently dropped every time, regardless of RF conditions.</li>
-      <li><strong>Fixed</strong> &mdash; once a repeater's ESP-NOW bridge had learned even one peer, it stopped broadcasting entirely, permanently excluding any peer that never transmits unprompted (a passive room server, by design) from every future relay. Flood-route traffic (channel messages, self-adverts) now gets one broadcast after the normal known-peer unicast fan-out; direct traffic's existing unicast-with-retry behavior is unchanged.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">changelog — beta 6</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">
-      Repeater firmware, same three boards, plus the companion &mdash; every
-      file ever shipped across any beta now ships in every new one, so the
-      companion build and both helper scripts are included here too, not
-      just on the beta 1 release.
-    </p>
-    <ul>
-      <li><strong>Changed</strong> &mdash; the IP bridge's reconnect no longer retries at a flat interval forever. On a real connect failure it now backs off (10s &rarr; 20s &rarr; 40s &rarr; 60s, capped) instead of hammering every 5 seconds indefinitely. The cap is deliberately short since this bridge only ever has one peer &mdash; no shared server to be polite to, so the priority is noticing the peer come back quickly.</li>
-      <li><strong>Fixed</strong> &mdash; that backoff wasn't actually escalating past 20s. The periodic DNS re-resolve (kicks in after a couple of failures, in case the peer's address changed) was resetting the failure counter on every successful lookup, since DNS succeeding says nothing about whether the peer itself is reachable. Now the counter only resets on an actual successful connection.</li>
-      <li><strong>New</strong> &mdash; the backoff distinguishes "no WiFi at all" from "WiFi's up but the peer isn't answering." A WiFi outage isn't the peer's fault: while WiFi itself is down, retries stay at a short flat interval instead of growing, so reconnecting happens quickly once WiFi actually comes back.</li>
-      <li><strong>New</strong> &mdash; the board's clock now re-syncs via NTP every 12 hours instead of only once at boot. These boards have no battery-backed RTC, so the clock was previously set once and then left to drift for the rest of the uptime.</li>
-    </ul>
-  </section>
-
-  <div class="divider"><div class="diamond"></div><div class="label">getting involved</div><div class="rule"></div></div>
-
-  <section>
-    <p class="lede">Two waves, deliberately — starting narrow with boards we've already validated.</p>
-
-    <div class="wave">
-      <span class="wave-tag">Wave 1 — now</span>
-      <h3>You already have a Xiao S3 WIO or Heltec V3/V4</h3>
-      <p>
-        These are the boards this has actually run on as a Trifecta
-        repeater. Everything's configurable from the standard MeshCore
-        serial CLI — no custom tooling, no special client:
+      <div class="path-name">Echo Board</div>
+      <div class="path-fit">You want a public channel to have a readable history</div>
+      <p class="path-desc">
+        A room server that quietly listens to one channel and turns its
+        messages into a post feed anyone can browse and catch up on — no
+        admin required to relay things by hand.
       </p>
-      <pre class="cli"><span class="c">$ pio run -e Xiao_S3_WIO_repeater_bridge_espnow_ip -t upload</span>
-<span class="k">set</span> bridge.channel 11
-<span class="k">set</span> bridge.secret &lt;your key&gt;
-<span class="k">set</span> wifi.ssid &lt;your ssid&gt;
-<span class="k">set</span> wifi.pwd &lt;your password&gt;
-<span class="k">set</span> ip.host &lt;peer host or IP&gt;</pre>
-      <p style="margin-top: 0.8rem;">
-        Once it's up, don't just assume it's working — these
-        <code>get</code> commands (plus <code>neighbors.all</code>) cover
-        every hop: WiFi, the ESP&#8209;NOW side-channel, and the IP link
-        itself:
-      </p>
-      <pre class="cli"><span class="k">get</span> wifi.status
-<span class="k">get</span> bridge.channel
-<span class="k">get</span> ip.status
-<span class="k">neighbors.all</span></pre>
-      <p style="margin-top: 0.8rem;">
-        <code>wifi.status</code> confirms the board actually associated
-        (connected, IP, RSSI). <code>bridge.channel</code> shows the
-        configured ESP&#8209;NOW channel next to the radio's actual live
-        channel and flags it explicitly if they've drifted apart (they share
-        one physical radio, and WiFi wins once it's connected).
-        <code>ip.status</code> reports whether the TCP+TLS&#8209;PSK tunnel to
-        the peer is currently up. <code>neighbors.all</code> merges RF-heard
-        and bridge-heard neighbours into one list with a <code>via</code>
-        column, so you can see which peers are actually reachable and
-        through which path. The rest of what's configured
-        (<code>get ip.host</code> / <code>get ip.port</code> /
-        <code>get wifi.ssid</code> / <code>get bridge.secret</code>, etc.)
-        reads back the same way any <code>set</code> value does.
-      </p>
-      <p style="margin-top: 0.8rem;">
-        Don't want to set up PlatformIO? Prebuilt binaries for Xiao S3 WIO,
-        Heltec V3, and Heltec V4 are on the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8">releases page</a>
-        — grab the plain <code>.bin</code> to upgrade an existing board
-        (keeps identity/WiFi/bonds intact) or the <code>-merged.bin</code>
-        for a blank one, flash with <code>esptool.py</code>, then configure
-        with the same CLI commands above.
-      </p>
-    </div>
-
-    <div class="wave">
-      <span class="wave-tag">Optional — no-LoRa companion</span>
-      <h3>Have a Waveshare ESP32-S3-Zero lying around?</h3>
-      <p>
-        This one's a companion with <em>no</em> LoRa radio at all — it joins
-        a Trifecta repeater's ESP&#8209;NOW side&#8209;channel as its primary
-        radio, so it uses zero LoRa airtime. Flash it the same way as a
-        repeater (grab
-        <code>ESP32_S3_Zero_comp_radio_bridge_espnow_dual</code> from the
-        <a href="https://github.com/smellyspice/MeshCore/releases/tag/trifecta-beta8">releases page</a>
-        or <a href="https://github.com/smellyspice/MeshCore/blob/espnow-ip-bridge/README.md">build it yourself</a>),
-        then one extra step: there's no phone-app UI yet for its
-        ESP&#8209;NOW channel/secret, so it needs a small script (also
-        attached to that release) to push them over USB:
-      </p>
-      <pre class="cli"><span class="c"># find the port, then check/set its config</span>
-<span class="k">python3</span> set_bridge_params.py list
-<span class="k">python3</span> set_bridge_params.py &lt;port&gt; get
-<span class="k">python3</span> set_bridge_params.py &lt;port&gt; set 11 &lt;your bridge secret&gt;</pre>
-      <p style="margin-top: 0.8rem;">
-        Channel and secret have to exactly match what's already set on the
-        repeater you want it to join (<code>get bridge.channel</code> /
-        <code>get bridge.secret</code> on that repeater's own CLI). Applies
-        immediately, no reboot. Needs Python 3 and <code>pip install
-        pyserial</code>. Every other role — repeaters, and companions with
-        their own LoRa radio talking to a Trifecta repeater normally —
-        needs nothing extra at all.
-      </p>
-      <p style="margin-top: 0.8rem;">
-        Same board, same ESP-NOW join, different firmware role: a
-        <code>simple_room_server</code> build (<code>ESP32_S3_Zero_room_server_bridge_espnow</code>,
-        also on the beta&nbsp;7 releases page) turns this into a BBS-style
-        message board reachable with zero LoRa hardware, with an optional
-        extra: it can passively listen on one public group channel and feed
-        its messages straight into the room's post feed
-        (<code>set room.channel &lt;name&gt; &lt;psk&gt;</code> over its own USB
-        serial CLI — this role has a normal text CLI, so no script needed
-        for this part). Configured with the same <code>set bridge.channel</code>/
-        <code>set bridge.secret</code> as above. If reflashing a board that
-        was previously running a different role, erase flash fully first
-        (<code>esptool.py erase_flash</code>) before flashing the merged
-        image — a role change doesn't touch the separate config partition
-        otherwise, and stale settings from the old role can cause boot
-        issues.
-      </p>
-    </div>
-
-    <div class="wave">
-      <span class="wave-tag">Wave 2 — once we've shaken out the basics</span>
-      <h3>Other ESP32 boards, broader testing</h3>
-      <p>
-        Building from source via PlatformIO for now. Prebuilt, flash-and-go
-        images for more boards are on the list once wave 1 turns up
-        anything that needs fixing first.
-      </p>
-    </div>
-
-    <div class="wave">
-      <span class="wave-tag">No hardware yet?</span>
-      <h3>Poke at the logic first</h3>
-      <p>
-        The native GoogleTest suite runs the real routing code on your
-        machine, no board required — useful if you just want to read
-        through what's being tested before committing to flashing anything.
-      </p>
-      <pre class="cli"><span class="c">$ pio test --environment native</span></pre>
-    </div>
-  </section>
+      <div class="path-go">Details &rarr;</div>
+    </a>
+  </div>
 
   <footer>
-    <span>A personal MeshCore fork, not an official project or release — see branch and firmware links above.</span>
+    <span>A personal MeshCore fork, not an official project or release.</span>
+    <span style="display:flex;gap:1rem"><a href="https://github.com/smellyspice/MeshCore/tree/espnow-ip-bridge">Branch</a><a href="https://github.com/smellyspice/MeshCore/releases">Releases</a></span>
   </footer>
+
 </div>
 
 </body>
