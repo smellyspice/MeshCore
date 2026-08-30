@@ -1,5 +1,9 @@
 #include "MyMesh.h"
 
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  #include <base64.hpp>
+#endif
+
 #define REPLY_DELAY_MILLIS          1500
 #define PUSH_NOTIFY_DELAY_MILLIS    2000
 #define SYNC_PUSH_INTERVAL          1200
@@ -41,6 +45,101 @@ struct ServerStats {
 void MyMesh::addPost(ClientInfo *client, const char *postData) {
   storePost(client->id, postData);
 }
+
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+void MyMesh::loadRoomChannel() {
+  _room_channel_set = false;
+  if (!_fs->exists(ROOM_CHANNEL_FILE)) return;
+
+  File file = _fs->open(ROOM_CHANNEL_FILE);
+  if (!file) return;
+
+  String name = file.readStringUntil('\n');
+  String psk = file.readStringUntil('\n');
+  file.close();
+
+  name.trim();
+  psk.trim();
+  if (name.length() > 0 && psk.length() > 0) {
+    setRoomChannel(name.c_str(), psk.c_str());
+  }
+}
+
+// Some apps/tools display a channel's PSK as hex rather than base64 -- accept
+// either rather than forcing a manual conversion. A plain hex string (only
+// 0-9a-f/A-F, exactly 32 or 64 chars) is detected first; anything else falls
+// through to base64, which is MeshCore's own convention (BaseChatMesh::addChannel()
+// et al) and what most companion apps actually export.
+static bool looksLikeHex(const char *s, size_t len) {
+  if (len != 32 && len != 64) return false;
+  for (size_t i = 0; i < len; i++) {
+    char c = s[i];
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+  }
+  return true;
+}
+
+bool MyMesh::setRoomChannel(const char *name, const char *psk_base64) {
+  uint8_t secret[32];
+  memset(secret, 0, sizeof(secret));
+  size_t psk_len = strlen(psk_base64);
+  int len;
+  if (looksLikeHex(psk_base64, psk_len)) {
+    len = (int) psk_len / 2;
+    if (!mesh::Utils::fromHex(secret, len, psk_base64)) return false;
+  } else {
+    len = decode_base64((unsigned char *) psk_base64, psk_len, secret);
+  }
+  if (len != 16 && len != 32) return false;
+
+  memcpy(_room_channel.secret, secret, sizeof(_room_channel.secret));
+  mesh::Utils::sha256(_room_channel.hash, sizeof(_room_channel.hash), secret, len);
+  StrHelper::strncpy(_room_channel_name, name, sizeof(_room_channel_name));
+  StrHelper::strncpy(_room_channel_psk, psk_base64, sizeof(_room_channel_psk));
+  _room_channel_set = true;
+
+  // ESP32-only feature (see WITH_ROOM_CHANNEL_BRIDGE gating) -- SPIFFS needs
+  // the explicit "w", true (create) form, same as IdentityStore::save().
+  File file = _fs->open(ROOM_CHANNEL_FILE, "w", true);
+  if (file) {
+    file.println(_room_channel_name);
+    file.println(_room_channel_psk);
+    file.close();
+  }
+  return true;
+}
+
+int MyMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel channels[], int max_matches) {
+  if (_room_channel_set && max_matches > 0 && _room_channel.hash[0] == hash[0]) {
+    channels[0] = _room_channel;
+    return 1;
+  }
+  return 0;
+}
+
+void MyMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel, uint8_t *data, size_t len) {
+  if (type != PAYLOAD_TYPE_GRP_TXT) return;   // only text messages become posts, not PAYLOAD_TYPE_GRP_DATA
+  if (len < 5) {
+    MESH_DEBUG_PRINTLN("room.channel: dropping short group text payload len=%d", (uint32_t)len);
+    return;
+  }
+
+  uint8_t txt_type = data[4];
+  if ((txt_type >> 2) != 0) {
+    MESH_DEBUG_PRINTLN("room.channel: dropping unsupported group text type=%d", (uint32_t)txt_type);
+    return;
+  }
+
+  data[len] = 0;   // make a C string again (same convention as BaseChatMesh::onGroupDataRecv)
+  MESH_DEBUG_PRINTLN("room.channel: recv \"%s\"", (const char *) &data[5]);
+
+  // Deliberately no channel-name prefix: this board only ever listens on one
+  // channel (see the class doc comment near ROOM_CHANNEL_FILE), so there's
+  // nothing to disambiguate -- posting the channel's own "sender: text" text
+  // verbatim keeps the full MAX_POST_TEXT_LEN budget for the message itself.
+  addSystemPost((const char *) &data[5]);
+}
+#endif
 
 void MyMesh::addSystemPost(const char *postData) {
   if (!postData || postData[0] == 0) return;
@@ -728,6 +827,22 @@ void MyMesh::begin(FILESYSTEM *fs) {
   board.setLoRaFemLnaEnabled(_prefs.radio_fem_rxgain);
   board.setLoRaFemPaGainEnabled(_prefs.radio_fem_txgain);
 
+#ifdef ESPNOW_BRIDGE_RADIO
+  // No compile-time BRIDGE_CHANNEL/BRIDGE_SECRET default -- radio_driver.init()
+  // (called before prefs were loaded) left the radio inert (no ESP-NOW peer
+  // registered). Only start it here once BOTH persisted prefs are actually
+  // set; a board with just one of the two configured stays inert rather than
+  // silently combining a real value with a placeholder for the other. Mirrors
+  // simple_repeater/MyMesh.cpp's begin().
+  if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+    radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+  }
+#endif
+
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  loadRoomChannel();
+#endif
+
   updateAdvertTimer();
   updateFloodAdvertTimer();
 
@@ -983,6 +1098,29 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       addSystemPost(msg);
       snprintf(reply, MAX_POST_TEXT_LEN, "OK");
     }
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  } else if (strcmp(command, "get room.channel") == 0) {
+    if (_room_channel_set) {
+      sprintf(reply, "> %s %s", _room_channel_name, _room_channel_psk);
+    } else {
+      strcpy(reply, "> (not set)");
+    }
+  } else if (memcmp(command, "room.channel ", 13) == 0) {
+    char* name = command + 13;
+    while (*name == ' ') name++;
+    char* sp = strchr(name, ' ');
+    if (sp == NULL) {
+      strcpy(reply, "Err - expected: room.channel <name> <psk_base64>");
+    } else {
+      *sp++ = 0;   // split name/psk
+      while (*sp == ' ') sp++;
+      if (setRoomChannel(name, sp)) {
+        strcpy(reply, "OK");
+      } else {
+        strcpy(reply, "Err - invalid PSK (must decode to 16 or 32 bytes)");
+      }
+    }
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

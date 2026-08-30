@@ -89,6 +89,18 @@ struct PostInfo {
   char text[MAX_POST_TEXT_LEN+1];
 };
 
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+// One public group channel this room server passively listens on, feeding
+// its text messages into the post feed as if an admin had typed them via
+// 'room.post'. Deliberately single-channel (one board == one #hashtag) --
+// this board's own identity already IS the channel's identity, so there's
+// no need to tag posts with a channel name the way a multi-channel design
+// would (see planning notes) -- posts just keep the channel's own embedded
+// "sender: text" as-is, preserving the full MAX_POST_TEXT_LEN budget.
+#define ROOM_CHANNEL_FILE   "/room_channel"
+#define ROOM_CHANNEL_NAME_LEN   32
+#endif
+
 class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   FILESYSTEM* _fs;
   uint32_t last_millis;
@@ -118,6 +130,15 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint8_t pending_sf;
   uint8_t pending_cr;
   int  matching_peer_indexes[MAX_CLIENTS];
+
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  char _room_channel_name[ROOM_CHANNEL_NAME_LEN];
+  char _room_channel_psk[65];  // longest accepted form: hex of a 32-byte key (64 chars) +null -- stored verbatim (whichever format was typed in) so 'get room.channel' can echo it back
+  mesh::GroupChannel _room_channel;
+  bool _room_channel_set = false;
+
+  void loadRoomChannel();
+#endif
 
   void addPost(ClientInfo* client, const char* postData);
   void storePost(const mesh::Identity& author, const char* postData);
@@ -166,6 +187,11 @@ protected:
   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
   void onAckRecv(mesh::Packet* packet, uint32_t ack_crc) override;
 
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
+  void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
+#endif
+
 #if ENV_INCLUDE_GPS == 1
   void applyGpsPrefs() {
     sensors.setSettingValue("gps", _prefs.gps_enabled?"1":"0");
@@ -179,6 +205,15 @@ public:
 
   void begin(FILESYSTEM* fs);
   void addSystemPost(const char* postData);
+
+#ifdef WITH_ROOM_CHANNEL_BRIDGE
+  // Persists name + PSK (base64) to flash and immediately activates it
+  // (recomputes hash+secret, no reboot needed). Returns false if the PSK
+  // doesn't decode to a valid 16 or 32 byte key.
+  bool setRoomChannel(const char* name, const char* psk_base64);
+  const char* getRoomChannelName() const { return _room_channel_set ? _room_channel_name : ""; }
+  const char* getRoomChannelPsk() const { return _room_channel_set ? _room_channel_psk : ""; }
+#endif
 
   const char* getFirmwareVer() override { return FIRMWARE_VERSION; }
   const char* getBuildDate() override { return FIRMWARE_BUILD_DATE; }
@@ -210,6 +245,14 @@ public:
   void dumpLogFile() override;
   void setTxPower(int8_t power_dbm) override;
   bool setRxBoostedGain(bool enable) override;
+
+#ifdef ESPNOW_BRIDGE_RADIO
+  void restartBridge() override {
+    if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+      radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    }
+  }
+#endif
 
   void formatNeighborsReply(char *reply) override {
     strcpy(reply, "not supported");
