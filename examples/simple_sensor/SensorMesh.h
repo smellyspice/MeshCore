@@ -26,6 +26,20 @@
 #include <RTClib.h>
 #include <target.h>
 
+#ifndef FLOOD_ADVERT_JITTER_MS
+  // +/- N ms applied to flood_advert_interval each time the timer
+  // reschedules, so identically-configured boards don't all flood-advert
+  // in lockstep (e.g. multiple sensor nodes deployed together in one room).
+  #define FLOOD_ADVERT_JITTER_MS   (10UL * 60 * 1000) // +/- 10 minutes
+#endif
+
+#ifndef LOCAL_ADVERT_JITTER_MS
+  // Same idea as FLOOD_ADVERT_JITTER_MS but scaled down -- advert_interval's
+  // minimum is 60 minutes (vs. flood_advert_interval's 3 hours), so a smaller
+  // window is used to avoid meaningfully changing the configured cadence.
+  #define LOCAL_ADVERT_JITTER_MS   (2UL * 60 * 1000) // +/- 2 minutes
+#endif
+
 #define PERM_RESERVED1         (1 << 2)
 #define PERM_RESERVED2         (1 << 3)
 #define PERM_RESERVED3         (1 << 4)

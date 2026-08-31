@@ -835,14 +835,18 @@ void SensorMesh::sendSelfAdvertisement(int delay_millis, bool flood) {
 
 void SensorMesh::updateAdvertTimer() {
   if (_prefs.advert_interval > 0) {  // schedule local advert timer
-    next_local_advert = futureMillis( ((uint32_t)_prefs.advert_interval) * 2 * 60 * 1000);
+    int32_t base_ms = (int32_t)_prefs.advert_interval * 2 * 60 * 1000;
+    int32_t jitter_ms = (int32_t)getRNG()->nextInt(0, 2 * LOCAL_ADVERT_JITTER_MS + 1) - (int32_t)LOCAL_ADVERT_JITTER_MS;
+    next_local_advert = futureMillis(base_ms + jitter_ms);
   } else {
     next_local_advert = 0;  // stop the timer
   }
 }
 void SensorMesh::updateFloodAdvertTimer() {
   if (_prefs.flood_advert_interval > 0) {  // schedule flood advert timer
-    next_flood_advert = futureMillis( ((uint32_t)_prefs.flood_advert_interval) * 60 * 60 * 1000);
+    uint32_t base_ms = ((uint32_t)_prefs.flood_advert_interval) * 60 * 60 * 1000;
+    int32_t jitter_ms = (int32_t)getRNG()->nextInt(0, 2 * FLOOD_ADVERT_JITTER_MS + 1) - (int32_t)FLOOD_ADVERT_JITTER_MS;
+    next_flood_advert = futureMillis(base_ms + jitter_ms);
   } else {
     next_flood_advert = 0;  // stop the timer
   }
