@@ -421,11 +421,23 @@ bool ESPNowBridgeRadio::startSendRaw(const uint8_t* bytes, int len) {
 
   s_last_tx_len = offset + len;
 
-  const uint8_t* dest = s_peer_known ? s_peer_mac : broadcastAddress;
+  // A zero-hop advert (DIRECT route, no path) has no real destination --
+  // it means "whoever's nearby, take note", the same as its inherently-
+  // broadcast behaviour on LoRa's RF layer. Unicasting it to just the
+  // known repeater peer (like every other packet type, correctly) would
+  // silence it to any other ESP-NOW peer that might be listening on the
+  // same channel. Detected directly off the still-unencrypted header/
+  // path-len bytes -- see Packet::writeTo() for the wire layout this
+  // mirrors (byte 0 = header, byte 1 = path_len when route type isn't
+  // one of the TRANSPORT_* variants, which a zero-hop advert never is).
+  bool zero_hop_advert = (((bytes[0] >> PH_TYPE_SHIFT) & PH_TYPE_MASK) == PAYLOAD_TYPE_ADVERT)
+                       && ((bytes[0] & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT)
+                       && (bytes[1] == 0);
+  const uint8_t* dest = (s_peer_known && !zero_hop_advert) ? s_peer_mac : broadcastAddress;
   esp_err_t result = esp_now_send(dest, buffer, s_last_tx_len);
   if (result == ESP_OK) {
     n_sent++;
-    ESPNOW_DEBUG_PRINTLN("Send success (%s)", s_peer_known ? "unicast" : "broadcast");
+    ESPNOW_DEBUG_PRINTLN("Send success (%s)", (dest == broadcastAddress) ? "broadcast" : "unicast");
     return true;
   }
   last_send_result = result;

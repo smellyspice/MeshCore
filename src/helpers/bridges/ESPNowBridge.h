@@ -97,7 +97,16 @@ private:
   // that sending again before the previous send's callback has returned can
   // cause "disorder" of the callback. A small bounded queue absorbs bursts
   // that arrive while a previous packet's fan-out/retries are still in flight.
-  static const uint8_t MAX_KNOWN_PEERS = 6;
+  // ESP-NOW's own hard limit is ESP_NOW_MAX_TOTAL_PEER_NUM=20 total
+  // registered peers (esp_now.h) -- NOT ESP_NOW_MAX_ENCRYPT_PEER_NUM=6,
+  // which only applies to encrypted peers and this bridge always registers
+  // with encrypt=false. One of the 20 slots is permanently used by the
+  // broadcast address (also registered via esp_now_add_peer(), see begin()),
+  // leaving 19 as the real max for individually-tracked unicast peers.
+  // Previously hardcoded to 6 with no documented reason -- raised to the
+  // actual safe maximum 2026-09-01 to support more than a handful of
+  // ESP-NOW peers on one repeater.
+  static const uint8_t MAX_KNOWN_PEERS = 19;
   static const uint8_t MAX_QUEUED_SENDS = 4;
   // Matches ESPNowBridgeRadio.cpp's MAX_TX_ATTEMPTS (raised 4->12 in beta 4 for
   // the exact same reason): the client->bridge direction and this bridge->client
@@ -120,6 +129,14 @@ private:
     // unlike DIRECT traffic, which has one real destination and benefits
     // from unicast-with-retry to it specifically. See advanceToNextPeerOrFinish().
     bool is_flood = false;
+    // A zero-hop advert (DIRECT route, no path) is the one DIRECT-route
+    // exception to that rule -- it has no real destination either, just
+    // "whoever's nearby", the same as its inherently-broadcast behaviour
+    // on LoRa's RF layer. Unicasting it to only the peers we already know
+    // about would leave any other peer on this same ESP-NOW segment (e.g.
+    // one that's never transmitted, so we've never learned its MAC)
+    // completely unaware of it. See progressSend().
+    bool is_zero_hop_advert = false;
   };
   QueuedSend _send_queue[MAX_QUEUED_SENDS];
 

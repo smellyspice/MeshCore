@@ -296,7 +296,11 @@ void ESPNowBridge::progressSend() {
   for (uint8_t i = 0; i < MAX_QUEUED_SENDS; i++) {
     if (_send_queue[i].in_use) {
       _active_queue_idx = i;
-      _active_peer_idx = (_known_peer_count == 0) ? PEER_IDX_BROADCAST : 0;
+      // Zero-hop adverts skip the known-peer unicast fan-out entirely --
+      // one broadcast is the whole point (see QueuedSend::is_zero_hop_advert)
+      // -- same as when no peers are known yet at all.
+      _active_peer_idx = (_known_peer_count == 0 || _send_queue[i].is_zero_hop_advert)
+                        ? PEER_IDX_BROADCAST : 0;
       _send_attempt = 0;
       _flood_broadcast_done = false;
       issueSend();
@@ -345,6 +349,9 @@ void ESPNowBridge::sendPacket(mesh::Packet *packet) {
 
   QueuedSend &q = _send_queue[slot];
   q.is_flood = packet->isRouteFlood();
+  q.is_zero_hop_advert = packet->getPayloadType() == PAYLOAD_TYPE_ADVERT
+                       && packet->getRouteType() == ROUTE_TYPE_DIRECT
+                       && packet->path_len == 0;
 
   // Write magic header (2 bytes)
   q.buffer[0] = (BRIDGE_PACKET_MAGIC >> 8) & 0xFF;
