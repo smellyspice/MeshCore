@@ -66,6 +66,16 @@ public:
   uint16_t ip_port = 0;
   char ip_secret[32];
 #endif
+#ifdef WITH_MQTT_BRIDGE
+  // MQTTBridge settings -- a single broker you run/trust yourself (e.g. your
+  // own self-hosted CoreScope instance), not a community broker preset. See
+  // MQTTBridge.h class doc comment.
+  uint8_t mqtt_enabled = 0;
+  char mqtt_server[96];   // full URL incl. scheme, e.g. mqtt://host:1883
+  char mqtt_username[32]; // optional, userpass auth
+  char mqtt_password[64]; // optional, userpass auth
+  char mqtt_iata[8];      // topic IATA-style code, e.g. "ABC"
+#endif
   // Power setting
   uint8_t powersaving_enabled = 0; // boolean
   // Gps settings
@@ -156,6 +166,23 @@ private:
   IpPrefs inet;
 #endif
 
+#ifdef WITH_MQTT_BRIDGE
+  class MqttPrefs : public ConfigSerializer {
+    NodePrefs* _parent;
+  protected:
+    void structure() override {
+      def("en", _parent->mqtt_enabled);
+      def("server", _parent->mqtt_server, sizeof(_parent->mqtt_server));
+      def("user", _parent->mqtt_username, sizeof(_parent->mqtt_username));
+      def("pass", _parent->mqtt_password, sizeof(_parent->mqtt_password));
+      def("iata", _parent->mqtt_iata, sizeof(_parent->mqtt_iata));
+    }
+  public:
+    MqttPrefs(NodePrefs* parent) : _parent(parent) { }
+  };
+  MqttPrefs mqtt;
+#endif
+
   class GPSPrefs : public ConfigSerializer {
     NodePrefs* _parent;
   protected:
@@ -225,6 +252,9 @@ protected:
 #ifdef WITH_IP_BRIDGE
     def("inet", inet);
 #endif
+#ifdef WITH_MQTT_BRIDGE
+    def("mqtt", mqtt);
+#endif
     def("gps", gps);
     def("repeat", repeat);
     def("room", room);
@@ -239,6 +269,9 @@ public:
 #ifdef WITH_IP_BRIDGE
     inet(this),
 #endif
+#ifdef WITH_MQTT_BRIDGE
+    mqtt(this),
+#endif
     gps(this), radio(this), power(this), repeat(this), room(this) {
     node_name[0] = 0;
     password[0] = 0;
@@ -251,6 +284,12 @@ public:
 #ifdef WITH_IP_BRIDGE
     ip_host[0] = 0;
     ip_secret[0] = 0;
+#endif
+#ifdef WITH_MQTT_BRIDGE
+    mqtt_server[0] = 0;
+    mqtt_username[0] = 0;
+    mqtt_password[0] = 0;
+    mqtt_iata[0] = 0;
 #endif
     owner_info[0] = 0;
   }
@@ -305,6 +344,11 @@ public:
   // returns true if it did. Default false lets CommonCLI report the command
   // as unsupported on builds without an IpBridge to ask.
   virtual bool formatIpStatus(char *reply) {
+    return false;
+  };
+
+  // Same convention, for 'get mqtt.status'.
+  virtual bool formatMqttStatus(char *reply) {
     return false;
   };
 

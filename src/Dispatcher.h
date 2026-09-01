@@ -166,6 +166,14 @@ protected:
   virtual void logTx(Packet* packet, int len) { }
   virtual void logTxFail(Packet* packet, int len) { }
 
+  // Called once, the first time a bridge-sourced packet (Packet::_src_bridge
+  // set by BridgeBase::handleReceivedPacket()) is dequeued for processing --
+  // logRx() above only ever fires on the real-radio receive path
+  // (checkRecv()), so a packet that arrived over ESPNowBridge/IpBridge/etc
+  // and is being processed for the first time needs its own hook. Default
+  // no-op.
+  virtual void logRxBridge(Packet* packet) { }
+
   // Called from sendPacket() after the packet is fully finalized but before
   // it's queued for local radio transmission. Return true if the packet has
   // been fully handled some other way (e.g. sent directly out a bridge);

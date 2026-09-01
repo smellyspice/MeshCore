@@ -600,6 +600,12 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 }
 
 void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+#ifdef WITH_MQTT_BRIDGE
+  // Unconditional, unlike the bridge_pkt_src-gated mesh-extension bridges
+  // below -- this is a passive observer with no loop-prevention concern, so
+  // it always sees every RX (see MQTTBridge.h class doc comment).
+  mqtt_bridge.publishRx(pkt, len, score, _radio->getLastSNR(), _radio->getLastRSSI());
+#endif
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 1) {
 #ifdef WITH_RS232_BRIDGE
@@ -634,6 +640,9 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 }
 
 void MyMesh::logTx(mesh::Packet *pkt, int len) {
+#ifdef WITH_MQTT_BRIDGE
+  mqtt_bridge.publishTx(pkt, len);
+#endif
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 0) {
 #ifdef WITH_RS232_BRIDGE
@@ -1160,6 +1169,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 #ifdef WITH_IP_BRIDGE
       , ip_bridge(&_prefs, _mgr, &rtc)
 #endif
+#ifdef WITH_MQTT_BRIDGE
+      , mqtt_bridge(&_prefs, _mgr, &rtc, &self_id)
+#endif
 {
   last_millis = 0;
   uptime_millis = 0;
@@ -1278,6 +1290,12 @@ void MyMesh::begin(FILESYSTEM *fs) {
     ip_bridge.begin();
 #endif
   }
+#endif
+#ifdef WITH_MQTT_BRIDGE
+  // Independent of bridge_enabled/WITH_BRIDGE above -- see MQTTBridge.h class
+  // doc comment. Gated purely on its own mqtt_enabled pref (checked inside
+  // begin() itself).
+  mqtt_bridge.begin();
 #endif
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
@@ -1720,6 +1738,9 @@ void MyMesh::loop() {
 #endif
   ip_bridge.loop();
   flushPendingIpSends();
+#endif
+#ifdef WITH_MQTT_BRIDGE
+  mqtt_bridge.loop();
 #endif
 
   mesh::Mesh::loop();

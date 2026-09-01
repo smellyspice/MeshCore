@@ -29,6 +29,13 @@
 #define WITH_BRIDGE
 #endif
 
+#ifdef WITH_MQTT_BRIDGE
+// Deliberately NOT #define WITH_BRIDGE -- see MQTTBridge.h class doc comment:
+// this is a passive observer, not a mesh-extension bridge, so it doesn't
+// join the bridge_pkt_src/loop-prevention group above.
+#include "helpers/bridges/MQTTBridge.h"
+#endif
+
 #include <helpers/AdvertDataHelpers.h>
 #include <helpers/ArduinoHelpers.h>
 #include <helpers/ClientACL.h>
@@ -217,6 +224,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #ifdef WITH_IP_BRIDGE
   IpBridge ip_bridge;
 #endif
+#ifdef WITH_MQTT_BRIDGE
+  // Not part of the WITH_BRIDGE group above -- this is a passive observer,
+  // not a mesh-extension bridge (see MQTTBridge.h class doc comment), so it
+  // doesn't participate in bridge_pkt_src/loop-prevention at all.
+  MQTTBridge mqtt_bridge;
+#endif
 
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
 #ifdef WITH_BRIDGE
@@ -254,6 +267,11 @@ protected:
 
   void logRx(mesh::Packet* pkt, int len, float score) override;
   void logTx(mesh::Packet* pkt, int len) override;
+#ifdef WITH_MQTT_BRIDGE
+  void logRxBridge(mesh::Packet* pkt) override {
+    mqtt_bridge.publishRxBridge(pkt, pkt->getRawLength());
+  }
+#endif
   void logTxFail(mesh::Packet* pkt, int len) override;
   int calcRxDelay(float score, uint32_t air_time) const override;
 
@@ -401,6 +419,10 @@ public:
     ip_bridge.end();
     ip_bridge.begin();
 #endif
+#ifdef WITH_MQTT_BRIDGE
+    mqtt_bridge.end();
+    mqtt_bridge.begin();
+#endif
 #ifdef ESPNOW_BRIDGE_RADIO
     // bridge.channel/bridge.secret here are ESPNowBridgeRadio's own, separate
     // from the IpBridge/etc member above despite the similar naming. Applying
@@ -410,6 +432,12 @@ public:
       radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
     }
 #endif
+  }
+#endif
+#ifdef WITH_MQTT_BRIDGE
+  bool formatMqttStatus(char *reply) override {
+    mqtt_bridge.formatStatus(reply);
+    return true;
   }
 #endif
 #ifdef WITH_IP_BRIDGE

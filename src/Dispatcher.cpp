@@ -139,6 +139,11 @@ void Dispatcher::loop() {
   {
     Packet* pkt = _mgr->getNextInbound(_ms->getMillis());
     if (pkt) {
+      // _src_bridge is only ever set by BridgeBase::handleReceivedPacket() --
+      // an RF-flood packet delayed here via checkRecv()'s own queueInbound()
+      // call already had logRx() fire earlier and never sets it, so this
+      // can't double-fire for that case.
+      if (pkt->_src_bridge != NULL) logRxBridge(pkt);
       processRecvPacket(pkt);
     }
   }

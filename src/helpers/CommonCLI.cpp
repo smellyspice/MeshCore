@@ -799,6 +799,33 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     savePrefs();
     strcpy(reply, "OK");
 #endif
+#ifdef WITH_MQTT_BRIDGE
+  } else if (memcmp(config, "mqtt.enabled ", 13) == 0) {
+    _prefs->mqtt_enabled = memcmp(&config[13], "on", 2) == 0;
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+  } else if (memcmp(config, "mqtt.server ", 12) == 0) {
+    StrHelper::strncpy(_prefs->mqtt_server, &config[12], sizeof(_prefs->mqtt_server));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+  } else if (memcmp(config, "mqtt.username ", 14) == 0) {
+    StrHelper::strncpy(_prefs->mqtt_username, &config[14], sizeof(_prefs->mqtt_username));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+  } else if (memcmp(config, "mqtt.password ", 14) == 0) {
+    StrHelper::strncpy(_prefs->mqtt_password, &config[14], sizeof(_prefs->mqtt_password));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+  } else if (memcmp(config, "mqtt.iata ", 10) == 0) {
+    StrHelper::strncpy(_prefs->mqtt_iata, &config[10], sizeof(_prefs->mqtt_iata));
+    _callbacks->restartBridge();
+    savePrefs();
+    strcpy(reply, "OK");
+#endif
   } else if (memcmp(config, "adc.multiplier ", 15) == 0) {
     _prefs->adc_multiplier = atof(&config[15]);
     if (_board->setAdcMultiplier(_prefs->adc_multiplier)) {
@@ -1017,6 +1044,23 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     strcpy(reply, "> ");
     if (!_callbacks->formatIpStatus(&reply[2])) {
       strcpy(reply, "Error: ip bridge not active");
+    }
+#endif
+#ifdef WITH_MQTT_BRIDGE
+  } else if (memcmp(config, "mqtt.enabled", 12) == 0) {
+    sprintf(reply, "> %s", _prefs->mqtt_enabled ? "on" : "off");
+  } else if (memcmp(config, "mqtt.server", 11) == 0) {
+    sprintf(reply, "> %s", _prefs->mqtt_server);
+  } else if (memcmp(config, "mqtt.username", 13) == 0) {
+    sprintf(reply, "> %s", _prefs->mqtt_username);
+  } else if (memcmp(config, "mqtt.password", 13) == 0) {
+    sprintf(reply, "> %s", _prefs->mqtt_password);
+  } else if (memcmp(config, "mqtt.iata", 9) == 0) {
+    sprintf(reply, "> %s", _prefs->mqtt_iata);
+  } else if (memcmp(config, "mqtt.status", 11) == 0) {
+    strcpy(reply, "> ");
+    if (!_callbacks->formatMqttStatus(&reply[2])) {
+      strcpy(reply, "Error: mqtt bridge not active");
     }
 #endif
   } else if (memcmp(config, "bootloader.ver", 14) == 0) {
