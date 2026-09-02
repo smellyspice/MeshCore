@@ -163,6 +163,36 @@ void MyMesh::storePost(const mesh::Identity &author, const char *postData) {
   next_push = futureMillis(PUSH_NOTIFY_DELAY_MILLIS);
   _num_posted++; // stats
   MESH_DEBUG_PRINTLN("room.post: next_post_idx=%d num_posted=%d push scheduled", next_post_idx, _num_posted);
+
+  savePosts();
+}
+
+void MyMesh::savePosts() {
+  File f = _fs->open(POSTS_FILE, "w", true);
+  if (!f) return;
+
+  f.write((const uint8_t *)&next_post_idx, sizeof(next_post_idx));
+  f.write((const uint8_t *)&_num_posted, sizeof(_num_posted));
+  f.write((const uint8_t *)posts, sizeof(posts));
+  f.close();
+}
+
+void MyMesh::loadPosts() {
+  if (!_fs->exists(POSTS_FILE)) return;
+
+  File f = _fs->open(POSTS_FILE);
+  if (!f) return;
+
+  size_t expected = sizeof(next_post_idx) + sizeof(_num_posted) + sizeof(posts);
+  if ((size_t)f.size() != expected) {  // stale/corrupt file from a different build -- ignore it
+    f.close();
+    return;
+  }
+
+  f.read((uint8_t *)&next_post_idx, sizeof(next_post_idx));
+  f.read((uint8_t *)&_num_posted, sizeof(_num_posted));
+  f.read((uint8_t *)posts, sizeof(posts));
+  f.close();
 }
 
 void MyMesh::pushPostToClient(ClientInfo *client, PostInfo &post) {
@@ -576,7 +606,8 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
           send_ack = false; // and no ACK...  user shoudn't be sending these
         }
       } else { // TXT_TYPE_PLAIN
-        if ((client->permissions & PERM_ACL_ROLE_MASK) == PERM_ACL_GUEST) {
+        uint8_t role = client->permissions & PERM_ACL_ROLE_MASK;
+        if (role == PERM_ACL_GUEST || role == PERM_ACL_READ_ONLY) {
           temp[5] = 0;      // no reply
           send_ack = false; // no ACK
         } else {
@@ -800,6 +831,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
   acl.load(_fs, self_id);
   region_map.load(_fs);
+  loadPosts();
 
   // establish default-scope
   {

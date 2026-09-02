@@ -95,6 +95,11 @@
 
 #define PACKET_LOG_FILE  "/packet_log"
 
+// Flat mirror of the posts[] cyclic queue below (next_post_idx + _num_posted
+// header, then the raw array), rewritten in full on every storePost() so a
+// reboot doesn't lose the backlog clients sync against.
+#define POSTS_FILE  "/posts"
+
 #define MAX_POST_TEXT_LEN    (160-9)
 
 struct PostInfo {
@@ -156,6 +161,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 
   void addPost(ClientInfo* client, const char* postData);
   void storePost(const mesh::Identity& author, const char* postData);
+  void savePosts();
+  void loadPosts();
   void pushPostToClient(ClientInfo* client, PostInfo& post);
   uint8_t getUnsyncedCount(ClientInfo* client);
   bool processAck(const uint8_t *data);
