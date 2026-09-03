@@ -219,6 +219,14 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
 #if defined(WITH_IP_BRIDGE)
   unsigned long _last_time_broadcast_at = 0;  // millis(), 0 = never yet -- see maybeBroadcastTime()
   static const uint32_t TIME_BROADCAST_INTERVAL_MS = 5UL * 60 * 1000;  // 5 min
+  // Set ONLY by main.cpp once it's confirmed real SNTP actually completed
+  // (sntp_get_sync_status(), not just "the clock value looks plausible" --
+  // the boot-default fallback clock also looks plausible), or by a human
+  // typing 'time <epoch>' at the CLI (onTrustedTimeSet() below). Never set
+  // by the boot-time fallback default, and never by a peer's 'clock sync'
+  // (that's another node's self-reported clock, not something to broadcast
+  // onward as if it were this repeater's own trusted time).
+  bool _time_trusted = false;
 #endif
 #endif
 #ifdef WITH_IP_BRIDGE
@@ -371,15 +379,29 @@ public:
   /**
    * Broadcasts this repeater's current time to the ESP-NOW segment
    * (ESPNowBridge::broadcastTime()) every TIME_BROADCAST_INTERVAL_MS, but
-   * only while time_valid is true -- callers (main.cpp) should pass their own
-   * "has NTP actually landed" flag, since a fresh boot's default clock must
-   * never get broadcast as if it were real. Call every loop() tick; internally
-   * a no-op except right at the interval boundary. Only compiled in for a
-   * dual-bridge repeater (WITH_IP_BRIDGE is where NTP time actually comes
-   * from -- WITH_ESPNOW_BRIDGE alone has no time source to broadcast).
+   * only once _time_trusted is true -- see markTimeTrusted()/isTimeTrusted().
+   * Call every loop() tick; internally a no-op except right at the interval
+   * boundary. Only compiled in for a dual-bridge repeater (WITH_IP_BRIDGE is
+   * where NTP time actually comes from -- WITH_ESPNOW_BRIDGE alone has no
+   * time source to broadcast).
    */
-  void maybeBroadcastTime(bool time_valid);
+  void maybeBroadcastTime();
+
+  // Call once real SNTP has genuinely completed (main.cpp) -- never for the
+  // boot-time fallback clock, which also happens to look plausible.
+  void markTimeTrusted() { _time_trusted = true; }
+  bool isTimeTrusted() const { return _time_trusted; }
 #endif
+
+  // Fires when a human explicitly sets the clock via the CLI ('time <epoch>')
+  // -- deliberate trust, unlike a peer's self-reported 'clock sync'. No-op
+  // default (CommonCLICallbacks); only meaningful where WITH_IP_BRIDGE +
+  // WITH_ESPNOW_BRIDGE both exist to actually broadcast it onward.
+  void onTrustedTimeSet() override {
+#if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
+    markTimeTrusted();
+#endif
+  }
 
 #if defined(WITH_BRIDGE)
   void setBridgeState(bool enable) override {

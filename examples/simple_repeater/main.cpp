@@ -19,6 +19,7 @@
 #if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
   #include <time.h>
+  #include <esp_sntp.h>
   #include "NtpConfig.h"
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
@@ -26,10 +27,21 @@
   // default every boot until something sets it. Re-applied periodically (see
   // NTP_RESYNC_INTERVAL_MS below) to bound long-run drift, not just once at
   // boot/reconnect.
+  //
+  // ntp_synced tracks "do we need to (re-)issue an SNTP query" -- local
+  // bookkeeping only, NOT a trust signal on its own. The boot-time fallback
+  // clock (ESP32RTCClock::begin()) sets a hardcoded date that already clears
+  // any plausibility check based on the epoch value alone, so trust is
+  // tracked separately via MyMesh::markTimeTrusted()/isTimeTrusted() --
+  // set only once sntp_get_sync_status() confirms a real SNTP reply actually
+  // landed (checked below), never from the epoch value by itself.
   bool ntp_synced = false;
   unsigned long last_ntp_sync_at = 0;
   #ifndef NTP_RESYNC_INTERVAL_MS
   #define NTP_RESYNC_INTERVAL_MS (12UL * 60 * 60 * 1000)  // 12h -- drift is slow, no need to be aggressive
+  #endif
+  #ifndef FIRMWARE_BUILD_EPOCH
+  #define FIRMWARE_BUILD_EPOCH 1700000000UL  // ~Nov 2023, only if build.sh wasn't used
   #endif
 #endif
 
@@ -266,12 +278,22 @@ void loop() {
     ntp_synced = false;   // re-apply once the reconnect's SNTP query lands
   }
   if (!ntp_synced) {
-    time_t now = time(NULL);
-    if (now > 1700000000) {   // plausible real UTC time, ie. SNTP has actually landed
-      rtc_clock.setCurrentTime((uint32_t)now);
-      ntp_synced = true;
-      last_ntp_sync_at = millis();
-      MESH_DEBUG_PRINTLN("Clock synced via NTP: %u", (uint32_t)now);
+    // sntp_get_sync_status() only reports COMPLETED once a real SNTP reply
+    // has actually been processed -- unlike checking the epoch value alone,
+    // this can't be fooled by the boot-time fallback clock, which sets a
+    // hardcoded date that already looks "plausible" despite never having
+    // talked to a real time server.
+    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      time_t now = time(NULL);
+      if (now > (time_t)FIRMWARE_BUILD_EPOCH) {   // sanity floor even on a genuine SNTP reply
+        rtc_clock.setCurrentTime((uint32_t)now);
+        ntp_synced = true;
+        last_ntp_sync_at = millis();
+#if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
+        the_mesh.markTimeTrusted();
+#endif
+        MESH_DEBUG_PRINTLN("Clock synced via NTP: %u", (uint32_t)now);
+      }
     }
   } else if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0 &&
              (millis() - last_ntp_sync_at > NTP_RESYNC_INTERVAL_MS)) {
@@ -285,7 +307,7 @@ void loop() {
 #endif
 
 #if defined(WITH_ESPNOW_BRIDGE) && defined(WITH_IP_BRIDGE)
-  the_mesh.maybeBroadcastTime(ntp_synced);
+  the_mesh.maybeBroadcastTime();
 #endif
 
   rtc_clock.tick();

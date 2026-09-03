@@ -335,6 +335,15 @@ public:
     // no op by default
   };
 
+  // Fires when a human explicitly sets the clock via 'time <epoch>' at the
+  // CLI -- deliberate, operator-trusted, unlike a peer's self-reported
+  // 'clock sync' (not this hook) or a boot-time fallback default (also not
+  // this hook). No-op by default; a dual-bridge repeater overrides it to
+  // allow broadcasting this time onward (see MyMesh::onTrustedTimeSet()).
+  virtual void onTrustedTimeSet() {
+    // no op by default
+  };
+
   virtual void restartBridge() {
     // no op by default
   };

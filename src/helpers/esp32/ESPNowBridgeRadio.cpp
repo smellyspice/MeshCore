@@ -105,10 +105,18 @@ static void xorCrypt(uint8_t* data, size_t len) {
 // checksum-validates against it came from something on this same private
 // ESP-NOW network, which is exactly the same guarantee the packet path below
 // relies on for RX. No comparison against this board's own current time --
-// just a plausibility floor (matching the repeater's own NTP-landed check)
-// and a cooldown so a steady stream of beacons only actually moves the clock
-// about twice a day.
-static const uint32_t TIME_BEACON_MIN_PLAUSIBLE = 1700000000;  // ~Nov 2023
+// just a plausibility floor and a cooldown so a steady stream of beacons
+// only actually moves the clock about twice a day.
+//
+// The floor is this board's own firmware build date, not a fixed historical
+// date -- no board should ever accept a time older than when its own
+// firmware was built, and unlike a hardcoded constant this doesn't need
+// bumping every release. Falls back to a fixed date only for a raw `pio run`
+// build that skipped build.sh's flag injection (FIRMWARE_BUILD_EPOCH unset).
+#ifndef FIRMWARE_BUILD_EPOCH
+#define FIRMWARE_BUILD_EPOCH 1700000000UL  // ~Nov 2023, only if build.sh wasn't used
+#endif
+static const uint32_t TIME_BEACON_MIN_PLAUSIBLE = FIRMWARE_BUILD_EPOCH;
 static const uint32_t TIME_APPLY_COOLDOWN_MS = 12UL * 60 * 60 * 1000;  // 12h
 static unsigned long s_last_time_applied_at = 0;  // millis(), 0 = never applied yet
 
