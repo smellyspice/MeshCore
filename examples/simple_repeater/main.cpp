@@ -18,9 +18,18 @@
 // (CommonCLI 'set wifi.ssid'/'set wifi.pwd'), never build flags.
 #if defined(ESP32) && (defined(ESPNOW_BRIDGE_RADIO) || defined(WITH_IP_BRIDGE))
   #include <WiFi.h>
+  #include <esp_wifi.h>
   #include <time.h>
   #include <esp_sntp.h>
   #include "NtpConfig.h"
+
+  // Boot-time default max power for this board's WiFi radio (see
+  // src/helpers/esp32/ESPNOWRadio.cpp -- shared convention so ESP-NOW and
+  // plain WiFi use on the same board agree).
+  #ifndef WIFI_TX_POWER
+  #define WIFI_TX_POWER 20
+  #endif
+
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
   // These boards have no battery-backed RTC, so rtc_clock resets to a bogus
@@ -148,6 +157,7 @@ void setup() {
   // harmless/idempotent to call again here. On a real-LoRa board there is no
   // ESP-NOW init to do it implicitly, so this is the only thing that does.
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 #endif
 
   the_mesh.begin(fs);

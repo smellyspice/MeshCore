@@ -3,6 +3,13 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
+// Boot-time default max power for this board's WiFi radio (see
+// src/helpers/esp32/ESPNOWRadio.cpp -- shared convention so ESP-NOW and
+// plain WiFi use on the same board agree).
+#ifndef WIFI_TX_POWER
+#define WIFI_TX_POWER 20
+#endif
+
 #ifdef WITH_ESPNOW_BRIDGE
 
 // Static member to handle callbacks
@@ -51,7 +58,9 @@ void ESPNowBridge::begin() {
 
   // Initialize WiFi in station mode
   WiFi.mode(WIFI_STA);
-  
+
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
+
   // Set Wi-Fi channel
   if (esp_wifi_set_channel(_prefs->bridge_channel, WIFI_SECOND_CHAN_NONE) != ESP_OK) {
     BRIDGE_DEBUG_PRINTLN("Error setting WIFI channel to %d\n", _prefs->bridge_channel);

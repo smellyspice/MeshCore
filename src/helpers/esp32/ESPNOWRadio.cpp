@@ -3,6 +3,15 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
+// Boot-time default max power for this board's WiFi radio (ESP-NOW and any
+// plain WiFi use share the same physical radio, so this should track
+// whatever the board's other WiFi entry points use). Quarter-dBm units are
+// what esp_wifi_set_max_tx_power() expects, hence the *4 at the call site --
+// override per-board via -D WIFI_TX_POWER=<dBm> in platformio.ini.
+#ifndef WIFI_TX_POWER
+#define WIFI_TX_POWER 20
+#endif
+
 static uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static esp_now_peer_info_t peerInfo;
 static volatile bool is_send_complete = false;
@@ -34,7 +43,7 @@ void ESPNOWRadio::init() {
     return;
   }
 
-  esp_wifi_set_max_tx_power(80);  // should be 20dBm
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);

@@ -4,6 +4,12 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
+// Boot-time default max power for this board's WiFi radio (see ESPNOWRadio.cpp --
+// shared convention so ESP-NOW and plain WiFi use on the same board agree).
+#ifndef WIFI_TX_POWER
+#define WIFI_TX_POWER 20
+#endif
+
 // Framing must match src/helpers/bridges/ESPNowBridge.cpp (BridgeBase::BRIDGE_PACKET_MAGIC/
 // BRIDGE_TIME_MAGIC) bit-for-bit, so this radio is wire-compatible with an unmodified
 // repeater's bridge.
@@ -253,7 +259,7 @@ void ESPNowBridgeRadio::init() {
     return;
   }
 
-  esp_wifi_set_max_tx_power(80);  // 20dBm, matches default LORA_TX_POWER applied again in begin()
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);

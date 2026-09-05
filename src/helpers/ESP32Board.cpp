@@ -5,15 +5,24 @@
 
 #if defined(ADMIN_PASSWORD) && !defined(DISABLE_WIFI_OTA)   // Repeater or Room Server only
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncElegantOTA.h>
 
 #include <SPIFFS.h>
 
+// Boot-time default max power for this board's WiFi radio (see
+// src/helpers/esp32/ESPNOWRadio.cpp -- shared convention so ESP-NOW and
+// plain WiFi use on the same board agree).
+#ifndef WIFI_TX_POWER
+#define WIFI_TX_POWER 20
+#endif
+
 bool ESP32Board::startOTAUpdate(const char* id, char reply[]) {
   inhibit_sleep = true;   // prevent sleep during OTA
   WiFi.softAP("MeshCore-OTA", NULL);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   sprintf(reply, "Started: http://%s/update", WiFi.softAPIP().toString().c_str());
   MESH_DEBUG_PRINTLN("startOTAUpdate: %s", reply);

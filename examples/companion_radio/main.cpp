@@ -39,7 +39,15 @@ MultiSerialInterface interface_manager;
   #ifdef ESP32
     // include esp32 wifi interface
     #include <helpers/esp32/SerialWifiInterface.h>
+    #include <esp_wifi.h>
     SerialWifiInterface wifi_interface;
+
+    // Boot-time default max power for this board's WiFi radio (see
+    // src/helpers/esp32/ESPNOWRadio.cpp -- shared convention so ESP-NOW and
+    // plain WiFi use on the same board agree).
+    #ifndef WIFI_TX_POWER
+    #define WIFI_TX_POWER 20
+    #endif
   #else
     #error "SerialWifiInterface is not defined for this platform"
   #endif
@@ -197,6 +205,7 @@ void setup() {
 #ifdef WIFI_SSID
   board.setInhibitSleep(true);   // prevent sleep when WiFi is active
   WiFi.setAutoReconnect(true);
+  esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
       if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
