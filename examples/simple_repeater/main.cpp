@@ -157,6 +157,7 @@ void setup() {
   // harmless/idempotent to call again here. On a real-LoRa board there is no
   // ESP-NOW init to do it implicitly, so this is the only thing that does.
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
   esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 #endif
 

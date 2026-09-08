@@ -246,6 +246,8 @@ void ESPNowBridgeRadio::init() {
 
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
+  // Modem sleep adds latency/jitter to every RX window -- off for ESP-NOW.
+  esp_wifi_set_ps(WIFI_PS_NONE);
 
   // NOTE: deliberately NOT enabling WIFI_PROTOCOL_LR here (unlike plain
   // ESPNOWRadio.cpp). ESPNowBridge on the repeater side never enables Long

@@ -34,6 +34,8 @@ static void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
 void ESPNOWRadio::init() {
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
+  // Modem sleep adds latency/jitter to every RX window -- off for ESP-NOW.
+  esp_wifi_set_ps(WIFI_PS_NONE);
   // Long Range mode
   esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR);
 

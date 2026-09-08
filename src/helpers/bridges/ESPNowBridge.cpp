@@ -58,6 +58,8 @@ void ESPNowBridge::begin() {
 
   // Initialize WiFi in station mode
   WiFi.mode(WIFI_STA);
+  // Modem sleep adds latency/jitter to every RX window -- off for ESP-NOW.
+  esp_wifi_set_ps(WIFI_PS_NONE);
 
   esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 

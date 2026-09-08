@@ -205,6 +205,7 @@ void setup() {
 #ifdef WIFI_SSID
   board.setInhibitSleep(true);   // prevent sleep when WiFi is active
   WiFi.setAutoReconnect(true);
+  esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
   esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
