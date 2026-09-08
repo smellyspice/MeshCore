@@ -9,9 +9,18 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
 
+#ifndef MAX_IP_PEERS
+// How many simultaneous server-side connections this bridge can hold open at
+// once. Covers e.g. a genuinely remote "friends-house" repeater plus a local
+// LAN gateway repeater, both connected to the same hub at the same time, with
+// some headroom. Each live peer costs a real mbedtls_ssl_context (a few KB of
+// heap) plus a small per-peer receive buffer -- raise this only after
+// confirming free-heap headroom on the actual board, not blindly.
+#define MAX_IP_PEERS 4
+#endif
+
 /**
- * @brief Bridge over TCP + TLS-PSK, for a point-to-point IP link between
- * exactly two paired MeshCore nodes.
+ * @brief Bridge over TCP + TLS-PSK, for IP links between MeshCore nodes.
  *
  * - TCP, not UDP: the OS's own retransmit/ordering/flow-control replaces
  *   what would otherwise need to be a hand-rolled ACK+retry layer on top of
@@ -22,28 +31,40 @@
  *   state machine like RS232Bridge/ESPNowBridge, with no FreeRTOS task or
  *   thread-safety surface.
  * - Role is inferred from config, not a build-time choice:
- *     _prefs->ip_host set -> CLIENT: dials out to ip_host:ip_port.
+ *     _prefs->ip_host set -> CLIENT: dials out to ip_host:ip_port. A client
+ *       only ever needs one relationship (to its one configured hub), so it
+ *       always uses _peers[0] and never touches any other slot.
  *     _prefs->ip_host empty, ip_port set -> SERVER: listens on ip_port,
- *       accepts connections, and requires each to complete a TLS-PSK
- *       handshake before it's trusted with anything.
- * - A new incoming connection while already CONNECTED to a peer is accepted
+ *       accepts up to MAX_IP_PEERS connections, and requires each to
+ *       complete a TLS-PSK handshake before it's trusted with anything.
+ *       Every peer authenticates with the same shared ip.secret -- same
+ *       convention as ESPNowBridge's one shared bridge.secret for its whole
+ *       segment, not a distinct identity per peer.
+ * - A new incoming connection while every slot is already in use is accepted
  *   into a separate "challenger" slot and must complete its own TLS-PSK
- *   handshake before it's allowed to replace the active session -- a bare
- *   TCP accept() proves nothing (a port scanner or any random connect()
- *   could otherwise knock out a live tunnel), so the swap only happens once
- *   the challenger has proven it holds the real secret. See
- *   pollChallengerHandshake(). This is what lets a legitimately reconnecting
- *   peer (e.g. after an IP change) get back in without the other side needing
- *   a manual reboot, while an unauthenticated connection attempt can't touch
- *   the existing tunnel at all.
- * - Dead-link detection is still app-level (ping/pong heartbeat, timeout):
- *   a peer that silently disappears (power loss, cable pull) gives no clean
- *   TCP close -- only a graceful FIN or an active RST would be caught by the
- *   OS, and this needs to catch the silent case too.
+ *   handshake before it's allowed to evict an existing peer -- a bare TCP
+ *   accept() proves nothing (a port scanner or any random connect() could
+ *   otherwise knock a live tunnel out), so the swap only happens once the
+ *   challenger has proven it holds the real secret. See
+ *   pollChallengerHandshake(). On success it evicts whichever slot has gone
+ *   longest without hearing anything (oldest last_rx_at), not a fixed slot.
+ *   This is what lets a legitimately reconnecting peer (e.g. after an IP
+ *   change) get back in without a manual reboot, while an unauthenticated
+ *   connection attempt can't touch any existing tunnel at all.
+ * - Every CONNECTED peer gets the exact same outbound traffic (both FLOOD and
+ *   DIRECT packets) -- see sendPacket(). Mesh-layer encryption already
+ *   protects DIRECT payload content from a peer it wasn't addressed to, so
+ *   this is a bandwidth tradeoff, not a plaintext leak; it also means no
+ *   per-peer destination routing/bookkeeping is needed here at all.
+ * - Dead-link detection is still app-level (ping/pong heartbeat, timeout),
+ *   tracked per peer: a peer that silently disappears (power loss, cable
+ *   pull) gives no clean TCP close -- only a graceful FIN or an active RST
+ *   would be caught by the OS, and this needs to catch the silent case too,
+ *   without one dead peer affecting any other peer's session.
  * - DNS (client side only) is failure-triggered: reconnect retries the last
  *   known-good IP first, only re-resolving after consecutive failures.
  *
- * Wire framing (once the TLS session is up) mirrors RS232Bridge:
+ * Wire framing (once a peer's TLS session is up) mirrors RS232Bridge:
  * [2 bytes] Magic Header (0xC03E)
  * [2 bytes] Payload Length
  * [n bytes] Mesh Packet Payload
@@ -83,74 +104,83 @@ public:
   // BRIDGE_DEBUG=1 the way the full handshake/heartbeat tracing does. Writes
   // a short human-readable summary into 'reply' (caller-owned buffer, same
   // convention as CommonCLICallbacks::formatStatsReply() etc -- no size
-  // param, caller's buffer is trusted to be large enough).
+  // param, caller's buffer is trusted to be large enough). Lists every
+  // non-idle peer slot on the server; single-session summary on the client.
   void formatStatus(char *reply) const;
 
 private:
   enum class State : uint8_t {
-    IDLE,           // not initialized / stopped
-    LISTENING,      // server mode, waiting for a peer to complete a handshake
-    TCP_CONNECTING, // client mode only, non-blocking connect() in progress
+    IDLE,           // slot empty / not initialized
+    TCP_CONNECTING, // client (_peers[0]) only: non-blocking connect() in progress
     HANDSHAKING,    // TLS handshake in progress (either role)
     CONNECTED,      // TLS session up, ready for framed packets
-    RECONNECT_WAIT, // client mode only, waiting before retrying
+    RECONNECT_WAIT, // client (_peers[0]) only: waiting before retrying
+  };
+
+  static constexpr uint16_t OVERHEAD = BRIDGE_MAGIC_SIZE + BRIDGE_LENGTH_SIZE + BRIDGE_CHECKSUM_SIZE;
+  static constexpr uint16_t MAX_PACKET_SIZE = (MAX_TRANS_UNIT + 1) + OVERHEAD;
+
+  // Everything that used to be a single scalar connection's worth of state on
+  // IpBridge itself, now one per slot. A client only ever populates _peers[0];
+  // a server uses as many as it has live connections, up to MAX_IP_PEERS.
+  struct PeerSlot {
+    State state = State::IDLE;
+    mbedtls_net_context conn_fd;
+    mbedtls_ssl_context ssl;
+
+    // millis() when the current HANDSHAKING attempt started -- bounds how
+    // long a handshake is allowed to sit unresolved (see class doc comment).
+    unsigned long handshake_started_at = 0;
+    // Throttles how often HANDSHAKING polls mbedtls_ssl_handshake() for this
+    // slot -- without it, each poll can block briefly in mbedtls_net_recv()
+    // when the peer is slow, and with several slots that adds up.
+    unsigned long next_handshake_poll_at = 0;
+
+    // Client (_peers[0]) only: TCP_CONNECTING timeout deadline, or
+    // RECONNECT_WAIT retry-at time. Unused on server slots.
+    unsigned long next_action_at = 0;
+
+    // Peer's source address (server role only) -- for formatStatus().
+    unsigned char client_ip[16] = {0};
+    size_t client_ip_len = 0;
+
+    // Heartbeat / dead-link detection, tracked independently per peer so one
+    // silent peer's timeout can't affect any other peer's session.
+    unsigned long last_rx_at = 0;
+    unsigned long next_ping_at = 0;
+
+    // Per-peer framing/parse state -- two peers can each be mid-frame at once.
+    uint8_t rx_buffer[MAX_PACKET_SIZE];
+    uint16_t rx_buffer_pos = 0;
   };
 
   bool _is_server = false;
-  State _state = State::IDLE;
-  unsigned long _next_action_at = 0;
+  bool _server_listening = false;  // instance-wide: is the listen socket bound and up
+  PeerSlot _peers[MAX_IP_PEERS];
 
   // BridgeBase's inherited _seen_packets is shared between RX and TX; a
   // packet needing to cross in one direction could be silently dropped
   // because identical content already crossed the other way. Separate TX
-  // table removes that false-positive for this bridge only.
+  // table removes that false-positive for this bridge only. Shared across
+  // every peer -- "have I already sent this exact packet on this bridge",
+  // not per-peer, same convention ESPNowBridge already uses for its whole
+  // multi-peer segment.
   SimpleMeshTables _tx_seen;
-
-  // Throttles how often HANDSHAKING polls mbedtls_ssl_handshake(). Without
-  // this, each poll blocks up to 1ms in mbedtls_net_recv_timeout() when the
-  // peer is unreachable, capping the whole main loop at ~1kHz and starving
-  // CLI/mesh dispatch/LEDs -- confirmed live against an unreachable peer.
-  unsigned long _next_handshake_poll_at = 0;
-
-  // millis() when the current HANDSHAKING attempt started -- set at every
-  // entry into that state (pollTcpConnecting() on success, pollListening()'s
-  // accept). Bounds how long a handshake is allowed to sit unresolved: a
-  // peer that stops responding mid-handshake would otherwise leave this
-  // stuck in HANDSHAKING forever -- the server's listening socket still
-  // accepts other connections independently (see the challenger slot below),
-  // but a client-side stall like this needs its own bound to ever recover.
-  // See checkHeartbeat() for the equivalent watchdog once actually
-  // CONNECTED -- this covers the gap before that point.
-  unsigned long _handshake_started_at = 0;
 
   // Last known-good IP for the client role, so most reconnects skip DNS.
   char _resolved_ip[16] = {0};
   uint8_t _consecutive_connect_failures = 0;
 
-  // Heartbeat / dead-link detection -- the only way to know the link is down
-  // when the peer disappears silently rather than closing cleanly. Only the
-  // client pings on its own initiative; the server never sends pings, so both
-  // roles instead watch _last_rx_at, updated on any valid received frame
-  // (ping, pong, or a real mesh packet). If too long has passed since
-  // anything was heard, the link is dead -- a simple time-since-last-rx
-  // check rather than a per-ping miss counter.
-  unsigned long _last_rx_at = 0;
-  unsigned long _next_ping_at = 0;
   bool _defer_heartbeat = false;  // see setDeferHeartbeat()
 
   mbedtls_net_context _listen_fd;
 
-  mbedtls_net_context _conn_fd_slot;
-  mbedtls_ssl_context _ssl_slot;
-  mbedtls_net_context *_conn_fd = &_conn_fd_slot;
-  mbedtls_ssl_context *_ssl = &_ssl_slot;
-
-  // "Challenger" slot: a second, fully separate connection accepted while
-  // already CONNECTED to a peer. Held only transiently while it proves
-  // itself via its own TLS-PSK handshake -- see pollChallengerHandshake().
-  // Never touches the active session's _conn_fd/_ssl above unless/until the
-  // challenger's handshake actually succeeds, at which point it's promoted
-  // and the old active session is torn down.
+  // "Challenger" slot: a connection accepted while every real slot is
+  // already in use. Held only transiently while it proves itself via its own
+  // TLS-PSK handshake -- see pollChallengerHandshake(). Never touches any
+  // active session unless/until the challenger's handshake actually
+  // succeeds, at which point it's promoted into whichever slot has gone
+  // longest without hearing anything, and that old session is torn down.
   bool _challenger_active = false;
   mbedtls_net_context _challenger_fd;
   mbedtls_ssl_context _challenger_ssl;
@@ -163,16 +193,6 @@ private:
   mbedtls_entropy_context _entropy;
   bool _tls_conf_ready = false;
 
-  // Source address of the currently-active peer (server role only) -- purely
-  // for formatStatus()'s "connected to peer X.X.X.X" display.
-  unsigned char _client_ip[16];
-  size_t _client_ip_len = 0;
-
-  static constexpr uint16_t OVERHEAD = BRIDGE_MAGIC_SIZE + BRIDGE_LENGTH_SIZE + BRIDGE_CHECKSUM_SIZE;
-  static constexpr uint16_t MAX_PACKET_SIZE = (MAX_TRANS_UNIT + 1) + OVERHEAD;
-  uint8_t _rx_buffer[MAX_PACKET_SIZE];
-  uint16_t _rx_buffer_pos = 0;
-
   // Heartbeat ping/pong are sent through the exact same magic+length+checksum
   // framing as real mesh packets (single-byte payload holding one of these
   // markers) rather than as special raw out-of-band bytes -- one framing/parsing
@@ -181,19 +201,28 @@ private:
   static constexpr uint8_t HEARTBEAT_PING = 0xF1;
   static constexpr uint8_t HEARTBEAT_PONG = 0xF2;
 
+  bool anyPeerConnected() const;
+  int findFreeSlot();          // -1 if none
+  int findStalestSlot();       // for challenger eviction when table is full
+  // For debug logging only -- with MAX_IP_PEERS>1, log lines that don't say
+  // which peer they're about have no way to be told apart (this bit us: a
+  // checksum-mismatch investigation couldn't rule out "two different peers,
+  // coincidentally matching checksum" until this existed).
+  int peerIndex(const PeerSlot &peer) const { return (int)(&peer - _peers); }
+
   bool setupTlsConfig();
-  void teardownConnection(bool reconnect);
+  void teardownConnection(PeerSlot &peer, bool reconnect);
   void scheduleReconnect();        // client-only: bump failure count, compute+log backoff, enter RECONNECT_WAIT
   void startListen();              // server: open+bind+listen the listening socket
-  void startConnect();             // client: kick off a new non-blocking connect() (cached IP first)
-  void pollTcpConnecting();        // client: poll the in-progress connect() for completion
-  void pollListening();            // server: accept new connections (primary or challenger)
-  void pollHandshake();            // poll the active session's TLS handshake
+  void startConnect();             // client: kick off a new non-blocking connect() (cached IP first) against _peers[0]
+  void pollTcpConnecting();        // client: poll the in-progress connect() for completion, against _peers[0]
+  void pollListening();            // server: accept new connections (into a free slot, or the challenger)
+  void pollHandshake(PeerSlot &peer);            // poll one slot's TLS handshake
   void pollChallengerHandshake();  // server: poll a pending challenger's TLS handshake
-  void pollConnectedIO();
-  void checkHeartbeat();           // send ping if due; teardown if pong overdue
-  void processFramedByte(uint8_t b);
-  void sendFramed(const uint8_t *payload, uint16_t len);  // shared: packets + heartbeat
+  void pollConnectedIO(PeerSlot &peer);
+  void checkHeartbeat(PeerSlot &peer);           // send ping if due (client); teardown if pong overdue (both)
+  void processFramedByte(PeerSlot &peer, uint8_t b);
+  void sendFramed(PeerSlot &peer, const uint8_t *payload, uint16_t len);  // shared: packets + heartbeat
   bool setupSslContext(mbedtls_ssl_context *ssl, mbedtls_net_context *fd);  // shared: ssl_setup + set_bio
 };
 

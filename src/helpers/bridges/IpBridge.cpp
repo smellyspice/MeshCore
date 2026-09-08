@@ -10,13 +10,27 @@
 #include <unistd.h>
 #include <errno.h>
 
-// Optional cross-cutting hook: boards that pair IpBridge with ESPNowBridgeRadio
-// (e.g. esp32_s3_zero) get a distinct blue LED flash when running in server/hub
-// mode. Gated the same way main.cpp already gates relockChannel() -- keeps
-// IpBridge itself portable, not hard-dependent on this one radio driver.
-#ifdef ESPNOW_BRIDGE_RADIO
+// Optional cross-cutting hook: boards whose radio_driver knows how to show
+// connect/disconnect/ping/pong status on an LED get that status lit up here.
+// Two concrete radio_driver types currently implement it -- ESPNowBridgeRadio
+// (a board that pairs IpBridge with it as its no-LoRa client radio, e.g. the
+// esp32_s3_zero companion/room-server envs) and NullRadio (a board that
+// pairs IpBridge with WITH_ESPNOW_BRIDGE's real host class instead, e.g. a
+// LoRa-less gateway repeater, which has no radio hardware at all). Only one
+// of these is ever compiled in for a given board. IP_BRIDGE_HAS_STATUS_LED
+// is what every call site below actually checks, so adding a third
+// LED-capable radio_driver later only means adding a branch here, not
+// touching every call site. Gated the same way main.cpp already gates
+// relockChannel() -- keeps IpBridge itself portable, not hard-dependent on
+// any one radio driver.
+#if defined(ESPNOW_BRIDGE_RADIO)
 #include <helpers/esp32/ESPNowBridgeRadio.h>
 extern ESPNowBridgeRadio radio_driver;
+#define IP_BRIDGE_HAS_STATUS_LED 1
+#elif defined(NULLRADIO_STATUS_LED)
+#include <helpers/esp32/NullRadio.h>
+extern NullRadio radio_driver;
+#define IP_BRIDGE_HAS_STATUS_LED 1
 #endif
 
 #ifndef IP_BRIDGE_PING_INTERVAL_MS
@@ -29,18 +43,18 @@ extern ESPNowBridgeRadio radio_driver;
 #define IP_BRIDGE_RECONNECT_DELAY_MS 5000    // base delay -- see reconnectDelayFor()
 #endif
 #ifndef IP_BRIDGE_RECONNECT_MAX_MS
-#define IP_BRIDGE_RECONNECT_MAX_MS   60000   // cap backoff at 60s -- this bridge only
+#define IP_BRIDGE_RECONNECT_MAX_MS   60000   // cap backoff at 60s -- a client only
                                               // ever has one peer, no shared server to
                                               // be gentle on, so bias toward noticing
                                               // the peer come back over minimizing retries
 #endif
 #ifndef IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS
-#define IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS 50  // see _next_handshake_poll_at in IpBridge.h
+#define IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS 50  // see next_handshake_poll_at in IpBridge.h
 #endif
 #ifndef IP_BRIDGE_HANDSHAKE_TIMEOUT_MS
-// Bounds how long a TLS handshake (primary or challenger) is allowed to sit
-// unresolved before being given up on -- see _handshake_started_at in
-// IpBridge.h for what this guards against.
+// Bounds how long a TLS handshake (any peer slot, or the challenger) is
+// allowed to sit unresolved before being given up on -- see
+// handshake_started_at in IpBridge.h for what this guards against.
 #define IP_BRIDGE_HANDSHAKE_TIMEOUT_MS 30000
 #endif
 #ifndef IP_BRIDGE_TCP_CONNECT_TIMEOUT_MS
@@ -71,19 +85,6 @@ extern ESPNowBridgeRadio radio_driver;
 // still being actively debugged. Also incidentally keeps NAT/router
 // connection-tracking state alive on a port-forwarded path, independent of
 // app-level traffic.
-// Client-only concept -- the server has no "reconnect", it just stays
-// LISTENING (a fresh peer is always welcome, no backoff needed there).
-// Doubles the base delay per consecutive failure, capped at
-// IP_BRIDGE_RECONNECT_MAX_MS, so a peer that's down for an extended stretch
-// (not just a transient blip) gets retried less aggressively over time
-// instead of a flat 5s forever. Shift is clamped well before it could push
-// the value past the cap anyway, just to keep the math trivially safe.
-static uint32_t reconnectDelayFor(uint8_t consecutive_failures) {
-  uint8_t shift = consecutive_failures > 6 ? 6 : consecutive_failures;
-  uint32_t delay = (uint32_t)IP_BRIDGE_RECONNECT_DELAY_MS << shift;
-  return delay > IP_BRIDGE_RECONNECT_MAX_MS ? IP_BRIDGE_RECONNECT_MAX_MS : delay;
-}
-
 static void applyTcpKeepalive(int fd) {
   int one = 1;
   setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
@@ -95,11 +96,26 @@ static void applyTcpKeepalive(int fd) {
   setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
 }
 
+// Client-only concept -- the server has no "reconnect", a freed slot just
+// goes back to IDLE (a fresh peer is always welcome, no backoff needed there).
+// Doubles the base delay per consecutive failure, capped at
+// IP_BRIDGE_RECONNECT_MAX_MS, so a peer that's down for an extended stretch
+// (not just a transient blip) gets retried less aggressively over time
+// instead of a flat 5s forever. Shift is clamped well before it could push
+// the value past the cap anyway, just to keep the math trivially safe.
+static uint32_t reconnectDelayFor(uint8_t consecutive_failures) {
+  uint8_t shift = consecutive_failures > 6 ? 6 : consecutive_failures;
+  uint32_t delay = (uint32_t)IP_BRIDGE_RECONNECT_DELAY_MS << shift;
+  return delay > IP_BRIDGE_RECONNECT_MAX_MS ? IP_BRIDGE_RECONNECT_MAX_MS : delay;
+}
+
 IpBridge::IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc)
     : BridgeBase(prefs, mgr, rtc) {
   mbedtls_net_init(&_listen_fd);
-  mbedtls_net_init(&_conn_fd_slot);
-  mbedtls_ssl_init(&_ssl_slot);
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    mbedtls_net_init(&_peers[i].conn_fd);
+    mbedtls_ssl_init(&_peers[i].ssl);
+  }
   mbedtls_net_init(&_challenger_fd);
   mbedtls_ssl_init(&_challenger_ssl);
   mbedtls_ssl_config_init(&_ssl_conf);
@@ -139,6 +155,10 @@ bool IpBridge::setupTlsConfig() {
   };
   mbedtls_ssl_conf_ciphersuites(&_ssl_conf, psk_ciphersuites);
 
+  // One shared secret for every peer -- same convention as ESPNowBridge's one
+  // shared bridge.secret for its whole segment, not a distinct identity per
+  // peer. Anyone holding ip.secret can connect as a peer; there's no per-peer
+  // accountability beyond source IP (see formatStatus()).
   size_t secret_len = strlen(_prefs->ip_secret);
   if (mbedtls_ssl_conf_psk(&_ssl_conf, (const unsigned char *)_prefs->ip_secret, secret_len,
                             (const unsigned char *)IP_BRIDGE_PSK_IDENTITY,
@@ -151,7 +171,7 @@ bool IpBridge::setupTlsConfig() {
   return true;
 }
 
-// Shared setup for both roles and for the challenger slot: a fresh
+// Shared setup for any slot (a real peer slot, or the challenger): a fresh
 // mbedtls_ssl_context bound to an already-non-blocking fd. f_recv_timeout is
 // deliberately NULL -- this makes mbedTLS fall back to the plain non-blocking
 // mbedtls_net_recv() (the fd is already non-blocking via
@@ -170,6 +190,39 @@ bool IpBridge::setupSslContext(mbedtls_ssl_context *ssl, mbedtls_net_context *fd
   return true;
 }
 
+bool IpBridge::anyPeerConnected() const {
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (_peers[i].state == State::CONNECTED) return true;
+  }
+  return false;
+}
+
+int IpBridge::findFreeSlot() {
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (_peers[i].state == State::IDLE) return i;
+  }
+  return -1;
+}
+
+// Picks which peer to evict for a challenger that's just proven itself, once
+// every slot is already in use. Prefers the CONNECTED slot that's gone
+// longest without hearing anything (oldest last_rx_at) over disturbing a slot
+// that's still (rarely) mid-handshake itself -- falls back to slot 0 only in
+// the degenerate case where every slot is somehow HANDSHAKING at once.
+int IpBridge::findStalestSlot() {
+  int stalest = -1;
+  unsigned long oldest_rx = 0;
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (_peers[i].state == State::CONNECTED) {
+      if (stalest < 0 || _peers[i].last_rx_at < oldest_rx) {
+        stalest = i;
+        oldest_rx = _peers[i].last_rx_at;
+      }
+    }
+  }
+  return stalest >= 0 ? stalest : 0;
+}
+
 void IpBridge::begin() {
   BRIDGE_DEBUG_PRINTLN("Initializing...\n");
 
@@ -185,26 +238,30 @@ void IpBridge::begin() {
 
   if (!setupTlsConfig()) return;
 
-  _rx_buffer_pos = 0;
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    _peers[i].state = State::IDLE;
+    _peers[i].rx_buffer_pos = 0;
+  }
   _consecutive_connect_failures = 0;
 
   if (_is_server) {
     startListen();
-#ifdef ESPNOW_BRIDGE_RADIO
-    if (_state == State::LISTENING) radio_driver.indicateServerMode();
+#ifdef IP_BRIDGE_HAS_STATUS_LED
+    if (_server_listening) radio_driver.indicateServerMode();
+#endif
+#ifdef IP_BRIDGE_HAS_STATUS_LED
+    // Not-connected indicator: hub listening with nobody there yet. Only
+    // reached once begin() has confirmed the bridge is actually configured
+    // and startListen() didn't fail, so an unconfigured board never lights
+    // this at all.
+    if (_server_listening) radio_driver.setLinkConnected(false);
 #endif
   } else {
     startConnect();
-  }
-
-#ifdef ESPNOW_BRIDGE_RADIO
-  // Not-connected indicator applies to both roles: hub listening with nobody
-  // there, or spoke dialing out/reconnecting. Only reached once begin() has
-  // confirmed the bridge is actually configured (both early-returns above
-  // already passed) and the start attempt didn't fail straight into IDLE, so
-  // an unconfigured board never lights this at all.
-  if (_state != State::IDLE) radio_driver.setLinkConnected(false);
+#ifdef IP_BRIDGE_HAS_STATUS_LED
+    if (_peers[0].state != State::IDLE) radio_driver.setLinkConnected(false);
 #endif
+  }
 
   _initialized = true;
 }
@@ -212,8 +269,14 @@ void IpBridge::begin() {
 void IpBridge::end() {
   BRIDGE_DEBUG_PRINTLN("Stopping...\n");
 
-  mbedtls_ssl_free(_ssl);
-  mbedtls_net_free(_conn_fd);
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    mbedtls_ssl_free(&_peers[i].ssl);
+    mbedtls_net_free(&_peers[i].conn_fd);
+    mbedtls_ssl_init(&_peers[i].ssl);
+    mbedtls_net_init(&_peers[i].conn_fd);
+    _peers[i].state = State::IDLE;
+    _peers[i].rx_buffer_pos = 0;
+  }
   mbedtls_net_free(&_listen_fd);
   mbedtls_ssl_free(&_challenger_ssl);
   mbedtls_net_free(&_challenger_fd);
@@ -222,8 +285,6 @@ void IpBridge::end() {
   mbedtls_entropy_free(&_entropy);
   _tls_conf_ready = false;
 
-  mbedtls_ssl_init(_ssl);
-  mbedtls_net_init(_conn_fd);
   mbedtls_net_init(&_listen_fd);
   mbedtls_ssl_init(&_challenger_ssl);
   mbedtls_net_init(&_challenger_fd);
@@ -231,15 +292,14 @@ void IpBridge::end() {
   mbedtls_ctr_drbg_init(&_ctr_drbg);
   mbedtls_entropy_init(&_entropy);
 
-  _state = State::IDLE;
-  _rx_buffer_pos = 0;
+  _server_listening = false;
   _challenger_active = false;
   _initialized = false;
 }
 
-// Formats the server-side peer address (_client_ip/_client_ip_len, raw bytes
-// from mbedtls_net_accept()) as dotted-decimal. IPv4 only -- this bridge is
-// built on WiFi.hostByName()/IPAddress throughout, never IPv6.
+// Formats a peer address (raw bytes from mbedtls_net_accept()) as
+// dotted-decimal. IPv4 only -- this bridge is built on
+// WiFi.hostByName()/IPAddress throughout, never IPv6.
 static void formatPeerIp(const unsigned char *ip, size_t len, char *out) {
   if (len == 4) {
     sprintf(out, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -249,36 +309,43 @@ static void formatPeerIp(const unsigned char *ip, size_t len, char *out) {
 }
 
 void IpBridge::formatStatus(char *reply) const {
-  unsigned long since_rx_secs = _last_rx_at == 0 ? 0 : (millis() - _last_rx_at) / 1000;
   char peer_ip[20];
   const char *challenger_note = _challenger_active ? " (+ challenger authenticating)" : "";
 
   if (_is_server) {
-    switch (_state) {
-      case State::IDLE:
-        sprintf(reply, "idle (not started)");
-        break;
-      case State::LISTENING:
-        sprintf(reply, "listening on port %u, no peer yet%s", (unsigned)_prefs->ip_port, challenger_note);
-        break;
-      case State::HANDSHAKING:
-        formatPeerIp(_client_ip, _client_ip_len, peer_ip);
-        sprintf(reply, "peer %s attempting handshake...%s", peer_ip, challenger_note);
-        break;
-      case State::CONNECTED:
-        formatPeerIp(_client_ip, _client_ip_len, peer_ip);
-        if (_last_rx_at == 0) {
-          sprintf(reply, "connected to peer %s, nothing received yet%s", peer_ip, challenger_note);
-        } else {
-          sprintf(reply, "connected to peer %s, last heard %lus ago%s", peer_ip, since_rx_secs, challenger_note);
-        }
-        break;
-      default:
-        sprintf(reply, "unknown state");
-        break;
+    if (!_server_listening) {
+      sprintf(reply, "idle (not started)");
+      return;
     }
-  } else {  // client
-    switch (_state) {
+
+    char *dp = reply;
+    dp += sprintf(dp, "listening on port %u", (unsigned)_prefs->ip_port);
+
+    int connected_count = 0;
+    for (int i = 0; i < MAX_IP_PEERS; i++) {
+      const PeerSlot &peer = _peers[i];
+      if (peer.state == State::IDLE) continue;
+      connected_count++;
+      formatPeerIp(peer.client_ip, peer.client_ip_len, peer_ip);
+      unsigned long since_rx_secs = peer.last_rx_at == 0 ? 0 : (millis() - peer.last_rx_at) / 1000;
+      if (peer.state == State::HANDSHAKING) {
+        dp += sprintf(dp, "; peer %s attempting handshake...", peer_ip);
+      } else if (peer.state == State::CONNECTED) {
+        if (peer.last_rx_at == 0) {
+          dp += sprintf(dp, "; peer %s connected, nothing received yet", peer_ip);
+        } else {
+          dp += sprintf(dp, "; peer %s connected, last heard %lus ago", peer_ip, since_rx_secs);
+        }
+      }
+    }
+    if (connected_count == 0) {
+      dp += sprintf(dp, ", no peers yet");
+    }
+    sprintf(dp, "%s", challenger_note);
+  } else {  // client, always _peers[0]
+    const PeerSlot &peer = _peers[0];
+    unsigned long since_rx_secs = peer.last_rx_at == 0 ? 0 : (millis() - peer.last_rx_at) / 1000;
+    switch (peer.state) {
       case State::IDLE:
         sprintf(reply, "idle (not started)");
         break;
@@ -289,7 +356,7 @@ void IpBridge::formatStatus(char *reply) const {
         sprintf(reply, "authenticating with %s (resolved: %s)...", _prefs->ip_host, _resolved_ip);
         break;
       case State::CONNECTED:
-        if (_last_rx_at == 0) {
+        if (peer.last_rx_at == 0) {
           sprintf(reply, "connected to %s (%s), nothing received yet", _prefs->ip_host, _resolved_ip);
         } else {
           sprintf(reply, "connected to %s (%s), last heard %lus ago", _prefs->ip_host, _resolved_ip, since_rx_secs);
@@ -311,7 +378,8 @@ void IpBridge::formatStatus(char *reply) const {
 }
 
 void IpBridge::scheduleReconnect() {
-  _state = State::RECONNECT_WAIT;
+  PeerSlot &peer = _peers[0];
+  peer.state = State::RECONNECT_WAIT;
 
   if (WiFi.status() != WL_CONNECTED) {
     // No network at all right now -- this isn't "the peer is unreachable",
@@ -323,14 +391,14 @@ void IpBridge::scheduleReconnect() {
     // that had nothing to do with the peer at all. If the peer genuinely
     // isn't answering once WiFi IS up, the real backoff below starts fresh.
     _consecutive_connect_failures = 0;
-    _next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
+    peer.next_action_at = millis() + IP_BRIDGE_RECONNECT_DELAY_MS;
     BRIDGE_DEBUG_PRINTLN("No WiFi yet, retrying in %us\n", (unsigned)(IP_BRIDGE_RECONNECT_DELAY_MS / 1000));
     return;
   }
 
   _consecutive_connect_failures++;
   uint32_t delay = reconnectDelayFor(_consecutive_connect_failures);
-  _next_action_at = millis() + delay;
+  peer.next_action_at = millis() + delay;
   BRIDGE_DEBUG_PRINTLN("Reconnecting in %us (%u consecutive failure%s)\n",
                         (unsigned)(delay / 1000), (unsigned)_consecutive_connect_failures,
                         _consecutive_connect_failures == 1 ? "" : "s");
@@ -347,11 +415,13 @@ void IpBridge::startListen() {
     return;
   }
   mbedtls_net_set_nonblock(&_listen_fd);
-  _state = State::LISTENING;
+  _server_listening = true;
   BRIDGE_DEBUG_PRINTLN("Listening on TCP %s\n", port_str);
 }
 
 void IpBridge::startConnect() {
+  PeerSlot &peer = _peers[0];
+
   // Only re-resolve after a couple of consecutive failures against the cached IP --
   // most reconnects are transient blips, not an actual home IP change, so this
   // skips DNS on the first attempt or two. Since _consecutive_connect_failures
@@ -373,12 +443,12 @@ void IpBridge::startConnect() {
     // reachable, and zeroing the counter on it was undoing the backoff every
     // time this re-resolve threshold was hit, capping it at 20s forever
     // instead of ever climbing higher. The counter only resets on an actual
-    // successful connection (see pollHandshake()/pollChallengerHandshake()).
+    // successful connection (see pollHandshake()).
     BRIDGE_DEBUG_PRINTLN("Resolved %s -> %s\n", _prefs->ip_host, _resolved_ip);
   }
 
-  mbedtls_net_free(_conn_fd);
-  mbedtls_net_init(_conn_fd);
+  mbedtls_net_free(&peer.conn_fd);
+  mbedtls_net_init(&peer.conn_fd);
 
   // mbedtls_net_connect() has no non-blocking TCP variant (see class doc
   // comment) -- it performs a real, blocking connect() for TCP, which would
@@ -417,16 +487,18 @@ void IpBridge::startConnect() {
   // bypassing mbedtls_net_connect() entirely for this step. Everything
   // downstream (mbedtls_net_set_nonblock(), mbedtls_ssl_set_bio(), etc.)
   // operates purely on ctx->fd and doesn't care how it got there.
-  _conn_fd->fd = fd;
-  _state = State::TCP_CONNECTING;
-  _next_action_at = millis() + IP_BRIDGE_TCP_CONNECT_TIMEOUT_MS;
+  peer.conn_fd.fd = fd;
+  peer.state = State::TCP_CONNECTING;
+  peer.next_action_at = millis() + IP_BRIDGE_TCP_CONNECT_TIMEOUT_MS;
   BRIDGE_DEBUG_PRINTLN("TCP connect in progress to %s:%u\n", _resolved_ip, (unsigned)_prefs->ip_port);
 }
 
 void IpBridge::pollTcpConnecting() {
-  if ((int32_t)(millis() - _next_action_at) > 0) {
+  PeerSlot &peer = _peers[0];
+
+  if ((int32_t)(millis() - peer.next_action_at) > 0) {
     BRIDGE_DEBUG_PRINTLN("TCP connect timed out\n");
-    mbedtls_net_free(_conn_fd);
+    mbedtls_net_free(&peer.conn_fd);
     scheduleReconnect();
     return;
   }
@@ -436,31 +508,31 @@ void IpBridge::pollTcpConnecting() {
   // SO_ERROR distinguishes success (0) from a real failure.
   fd_set wfds;
   FD_ZERO(&wfds);
-  FD_SET(_conn_fd->fd, &wfds);
+  FD_SET(peer.conn_fd.fd, &wfds);
   struct timeval tv = {0, 0};
-  int sel = select(_conn_fd->fd + 1, NULL, &wfds, NULL, &tv);
+  int sel = select(peer.conn_fd.fd + 1, NULL, &wfds, NULL, &tv);
   if (sel <= 0) return;  // not resolved yet, keep waiting
 
   int sock_err = 0;
   socklen_t err_len = sizeof(sock_err);
-  getsockopt(_conn_fd->fd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
+  getsockopt(peer.conn_fd.fd, SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
   if (sock_err != 0) {
     BRIDGE_DEBUG_PRINTLN("TCP connect failed, err=%d\n", sock_err);
-    mbedtls_net_free(_conn_fd);
+    mbedtls_net_free(&peer.conn_fd);
     scheduleReconnect();
     return;
   }
 
-  if (!setupSslContext(_ssl, _conn_fd)) {
-    mbedtls_net_free(_conn_fd);
+  if (!setupSslContext(&peer.ssl, &peer.conn_fd)) {
+    mbedtls_net_free(&peer.conn_fd);
     scheduleReconnect();
     return;
   }
 
-  _rx_buffer_pos = 0;
-  _state = State::HANDSHAKING;
-  _next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
-  _handshake_started_at = millis();
+  peer.rx_buffer_pos = 0;
+  peer.state = State::HANDSHAKING;
+  peer.next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
+  peer.handshake_started_at = millis();
   BRIDGE_DEBUG_PRINTLN("TCP connected, starting TLS handshake\n");
 }
 
@@ -483,33 +555,35 @@ void IpBridge::pollListening() {
 
   applyTcpKeepalive(new_conn.fd);
 
-  if (_state == State::LISTENING) {
-    // No active peer yet -- this becomes the primary session, same as
+  int free_idx = findFreeSlot();
+  if (free_idx >= 0) {
+    // A free slot exists -- this becomes that slot's session, same as
     // always. A bare accept() doesn't need extra scrutiny here: nothing
-    // valuable exists yet to protect.
-    mbedtls_net_free(_conn_fd);
-    *_conn_fd = new_conn;
-    memcpy(_client_ip, peer_ip, peer_ip_len);
-    _client_ip_len = peer_ip_len;
+    // valuable exists yet in an empty slot to protect.
+    PeerSlot &peer = _peers[free_idx];
+    mbedtls_net_free(&peer.conn_fd);
+    peer.conn_fd = new_conn;
+    memcpy(peer.client_ip, peer_ip, peer_ip_len);
+    peer.client_ip_len = peer_ip_len;
 
-    if (!setupSslContext(_ssl, _conn_fd)) {
-      mbedtls_net_free(_conn_fd);
-      return;  // stay LISTENING
+    if (!setupSslContext(&peer.ssl, &peer.conn_fd)) {
+      mbedtls_net_free(&peer.conn_fd);
+      return;  // slot stays IDLE
     }
 
-    _rx_buffer_pos = 0;
-    _state = State::HANDSHAKING;
-    _next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
-    _handshake_started_at = millis();
-    BRIDGE_DEBUG_PRINTLN("Peer connecting, starting TLS handshake\n");
+    peer.rx_buffer_pos = 0;
+    peer.state = State::HANDSHAKING;
+    peer.next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
+    peer.handshake_started_at = millis();
+    BRIDGE_DEBUG_PRINTLN("Peer connecting (slot %d), starting TLS handshake\n", free_idx);
     return;
   }
 
-  // Already have an active/pending session (HANDSHAKING or CONNECTED) -- a
-  // bare TCP accept() proves nothing yet (see class doc comment), so this
-  // must NOT touch the existing session. Land it in the challenger slot and
-  // let it prove itself via its own handshake first. Only one challenger at
-  // a time -- reject a second simultaneous attempt outright rather than
+  // Every slot is already in use (HANDSHAKING or CONNECTED) -- a bare TCP
+  // accept() proves nothing yet (see class doc comment), so this must NOT
+  // touch any existing session. Land it in the challenger slot and let it
+  // prove itself via its own handshake first. Only one challenger at a
+  // time -- reject a second simultaneous attempt outright rather than
   // letting an unauthenticated flood tie up unbounded resources.
   if (_challenger_active) {
     BRIDGE_DEBUG_PRINTLN("Rejecting extra connection attempt, a challenger is already mid-handshake\n");
@@ -529,28 +603,29 @@ void IpBridge::pollListening() {
 
   _challenger_active = true;
   _challenger_handshake_started_at = millis();
-  BRIDGE_DEBUG_PRINTLN("New connection while already connected -- challenger handshake starting\n");
+  BRIDGE_DEBUG_PRINTLN("New connection while all %d slots full -- challenger handshake starting\n", MAX_IP_PEERS);
 }
 
-void IpBridge::pollHandshake() {
-  if ((int32_t)(millis() - _handshake_started_at) > (int32_t)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS) {
+void IpBridge::pollHandshake(PeerSlot &peer) {
+  if ((int32_t)(millis() - peer.handshake_started_at) > (int32_t)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS) {
     // A peer that stops responding mid-handshake would otherwise leave this
     // stuck here forever. Same recovery path as any other handshake
-    // failure: teardownConnection() already knows how to get the server
-    // back to LISTENING or the client back to RECONNECT_WAIT.
-    BRIDGE_DEBUG_PRINTLN("TLS handshake timed out after %ums, giving up\n", (unsigned)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS);
-    teardownConnection(true);
+    // failure: teardownConnection() already knows how to free the slot (or
+    // put the client into RECONNECT_WAIT).
+    BRIDGE_DEBUG_PRINTLN("[peer %d] TLS handshake timed out after %ums, giving up\n",
+                         peerIndex(peer), (unsigned)IP_BRIDGE_HANDSHAKE_TIMEOUT_MS);
+    teardownConnection(peer, true);
     return;
   }
 
-  int ret = mbedtls_ssl_handshake(_ssl);
+  int ret = mbedtls_ssl_handshake(&peer.ssl);
   if (ret == 0) {
-    BRIDGE_DEBUG_PRINTLN("TLS session established\n");
-    _state = State::CONNECTED;
-    _last_rx_at = millis();
-    _next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
+    BRIDGE_DEBUG_PRINTLN("[peer %d] TLS session established\n", peerIndex(peer));
+    peer.state = State::CONNECTED;
+    peer.last_rx_at = millis();
+    peer.next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
     _consecutive_connect_failures = 0;
-#ifdef ESPNOW_BRIDGE_RADIO
+#ifdef IP_BRIDGE_HAS_STATUS_LED
     radio_driver.setLinkConnected(true);
 #endif
     return;
@@ -559,8 +634,8 @@ void IpBridge::pollHandshake() {
     return;  // keep polling
   }
 
-  BRIDGE_DEBUG_PRINTLN("TLS handshake failed, err=%d\n", ret);
-  teardownConnection(true);
+  BRIDGE_DEBUG_PRINTLN("[peer %d] TLS handshake failed, err=%d\n", peerIndex(peer), ret);
+  teardownConnection(peer, true);
 }
 
 void IpBridge::pollChallengerHandshake() {
@@ -584,168 +659,171 @@ void IpBridge::pollChallengerHandshake() {
     return;
   }
 
-  // Challenger just proved it holds the real PSK -- promote it, tearing
-  // down whatever was active before (a stale session, or a still-unproven
-  // handshake attempt). This is what lets a legitimately reconnecting peer
-  // (e.g. after an IP change) take back over without needing the other side
-  // rebooted.
-  BRIDGE_DEBUG_PRINTLN("Challenger authenticated, replacing active session\n");
-  mbedtls_ssl_free(_ssl);
-  mbedtls_net_free(_conn_fd);
+  // Challenger just proved it holds the real PSK -- promote it into whichever
+  // slot has gone longest without hearing anything, tearing down whatever was
+  // active there before. This is what lets a legitimately reconnecting peer
+  // (e.g. after an IP change) take back over without needing anything
+  // rebooted, even when every slot was already in use.
+  int target_idx = findStalestSlot();
+  PeerSlot &peer = _peers[target_idx];
+  BRIDGE_DEBUG_PRINTLN("Challenger authenticated, replacing slot %d\n", target_idx);
+  mbedtls_ssl_free(&peer.ssl);
+  mbedtls_net_free(&peer.conn_fd);
 
-  *_ssl = _challenger_ssl;
-  *_conn_fd = _challenger_fd;
-  memcpy(_client_ip, _challenger_ip, _challenger_ip_len);
-  _client_ip_len = _challenger_ip_len;
+  peer.ssl = _challenger_ssl;
+  peer.conn_fd = _challenger_fd;
+  memcpy(peer.client_ip, _challenger_ip, _challenger_ip_len);
+  peer.client_ip_len = _challenger_ip_len;
 
-  // Struct contents were moved into _ssl/_conn_fd above -- reset the
+  // Struct contents were moved into peer.ssl/peer.conn_fd above -- reset the
   // challenger slot to a fresh empty state without freeing (ownership of
   // the underlying fd/TLS session already transferred).
   mbedtls_ssl_init(&_challenger_ssl);
   mbedtls_net_init(&_challenger_fd);
   _challenger_active = false;
 
-  // _ssl's bio was bound against &_challenger_fd's address; retarget it to
-  // the now-promoted _conn_fd (same fd value, different storage location).
-  mbedtls_ssl_set_bio(_ssl, _conn_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
+  // peer.ssl's bio was bound against &_challenger_fd's address; retarget it
+  // to the now-promoted peer.conn_fd (same fd value, different storage
+  // location).
+  mbedtls_ssl_set_bio(&peer.ssl, &peer.conn_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
 
-  _rx_buffer_pos = 0;
-  _state = State::CONNECTED;
-  _last_rx_at = millis();
-  _next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
+  peer.rx_buffer_pos = 0;
+  peer.state = State::CONNECTED;
+  peer.last_rx_at = millis();
+  peer.next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
   _consecutive_connect_failures = 0;
-#ifdef ESPNOW_BRIDGE_RADIO
+#ifdef IP_BRIDGE_HAS_STATUS_LED
   radio_driver.setLinkConnected(true);
 #endif
 }
 
-void IpBridge::teardownConnection(bool reconnect) {
-  mbedtls_ssl_free(_ssl);
-  mbedtls_ssl_init(_ssl);
-  mbedtls_net_free(_conn_fd);
-  mbedtls_net_init(_conn_fd);
-  _rx_buffer_pos = 0;
+void IpBridge::teardownConnection(PeerSlot &peer, bool reconnect) {
+  mbedtls_ssl_free(&peer.ssl);
+  mbedtls_ssl_init(&peer.ssl);
+  mbedtls_net_free(&peer.conn_fd);
+  mbedtls_net_init(&peer.conn_fd);
+  peer.rx_buffer_pos = 0;
 
   if (_is_server) {
-    // Just go back to waiting for a (possibly new) peer -- the listening
-    // socket was never touched by accept()/teardown with real TCP, so it
-    // stays live and accepting the whole time regardless.
-    _state = State::LISTENING;
-#ifdef ESPNOW_BRIDGE_RADIO
-    radio_driver.setLinkConnected(false);
+    // Free the slot -- it goes straight back to IDLE, ready for
+    // findFreeSlot() to hand it to a fresh accept(). The listening socket
+    // was never touched by accept()/teardown with real TCP, so it stays
+    // live and accepting the whole time regardless.
+    peer.state = State::IDLE;
+#ifdef IP_BRIDGE_HAS_STATUS_LED
+    if (!anyPeerConnected()) radio_driver.setLinkConnected(false);
 #endif
   } else if (reconnect) {
     scheduleReconnect();
-#ifdef ESPNOW_BRIDGE_RADIO
+#ifdef IP_BRIDGE_HAS_STATUS_LED
     radio_driver.setLinkConnected(false);
 #endif
   } else {
-    _state = State::IDLE;
+    peer.state = State::IDLE;
   }
 }
 
-void IpBridge::checkHeartbeat() {
+void IpBridge::checkHeartbeat(PeerSlot &peer) {
   unsigned long now = millis();
 
   // Both roles watch for staleness -- the only way either side learns the
   // link is dead when the peer disappears silently instead of closing
-  // cleanly.
-  if ((int32_t)(now - _last_rx_at) > IP_BRIDGE_PONG_TIMEOUT_MS) {
-    BRIDGE_DEBUG_PRINTLN("Heartbeat timeout, link considered dead\n");
-    teardownConnection(true);
+  // cleanly. Tracked per peer, so one dead peer can't affect any other.
+  if ((int32_t)(now - peer.last_rx_at) > IP_BRIDGE_PONG_TIMEOUT_MS) {
+    BRIDGE_DEBUG_PRINTLN("[peer %d] Heartbeat timeout, link considered dead\n", peerIndex(peer));
+    teardownConnection(peer, true);
     return;
   }
 
   // Only the client/spoke pings on its own initiative -- see the field comment
-  // on _last_rx_at in IpBridge.h for why the server/hub doesn't. _defer_heartbeat
+  // on last_rx_at in IpBridge.h for why the server/hub doesn't. _defer_heartbeat
   // (see setDeferHeartbeat()) postpones just this send by a tick or two when
-  // ESP-NOW is mid-transaction -- _next_ping_at is deliberately left alone so
+  // ESP-NOW is mid-transaction -- next_ping_at is deliberately left alone so
   // it's retried again next loop() instead of being pushed a full interval out.
-  if (!_is_server && !_defer_heartbeat && (int32_t)(now - _next_ping_at) >= 0) {
-    BRIDGE_DEBUG_PRINTLN("Sending heartbeat ping\n");
+  if (!_is_server && !_defer_heartbeat && (int32_t)(now - peer.next_ping_at) >= 0) {
+    BRIDGE_DEBUG_PRINTLN("[peer %d] Sending heartbeat ping\n", peerIndex(peer));
     uint8_t ping = HEARTBEAT_PING;
-    sendFramed(&ping, 1);
-#ifdef ESPNOW_BRIDGE_RADIO
+    sendFramed(peer, &ping, 1);
+#ifdef IP_BRIDGE_HAS_STATUS_LED
     radio_driver.indicateIpPing();
 #endif
-    _next_ping_at = now + IP_BRIDGE_PING_INTERVAL_MS;
+    peer.next_ping_at = now + IP_BRIDGE_PING_INTERVAL_MS;
   }
 }
 
-void IpBridge::pollConnectedIO() {
-  checkHeartbeat();
+void IpBridge::pollConnectedIO(PeerSlot &peer) {
+  checkHeartbeat(peer);
 
   // checkHeartbeat() can call teardownConnection() internally (dead-link
-  // timeout), which frees _ssl and changes _state. Must not fall through to
-  // using _ssl below in that case.
-  if (_state != State::CONNECTED) return;
+  // timeout), which frees peer.ssl and changes peer.state. Must not fall
+  // through to using peer.ssl below in that case.
+  if (peer.state != State::CONNECTED) return;
 
   // bounded drain per loop() call -- responsive without hogging the main loop
   // if a burst of traffic arrives all at once
   for (int i = 0; i < 4; i++) {
     uint8_t buf[64];
-    int n = mbedtls_ssl_read(_ssl, buf, sizeof(buf));
+    int n = mbedtls_ssl_read(&peer.ssl, buf, sizeof(buf));
     if (n > 0) {
-      for (int j = 0; j < n; j++) processFramedByte(buf[j]);
+      for (int j = 0; j < n; j++) processFramedByte(peer, buf[j]);
       // processFramedByte() can itself call sendFramed() (replying to a ping
       // with a pong), which tears down the connection on write failure --
       // same stale-context hazard as above, just reached a different way.
-      if (_state != State::CONNECTED) return;
+      if (peer.state != State::CONNECTED) return;
       if (n < (int)sizeof(buf)) break;  // drained what was available
       continue;
     }
     if (n == 0 || n == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-      teardownConnection(true);
+      teardownConnection(peer, true);
       return;
     }
     if (n == MBEDTLS_ERR_SSL_WANT_READ) {
       break;  // nothing more available right now, normal
     }
     // any other return value is a real error
-    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_read error %d\n", n);
-    teardownConnection(true);
+    BRIDGE_DEBUG_PRINTLN("[peer %d] mbedtls_ssl_read error %d\n", peerIndex(peer), n);
+    teardownConnection(peer, true);
     return;
   }
 }
 
-void IpBridge::processFramedByte(uint8_t b) {
-  if (_rx_buffer_pos < 2) {
+void IpBridge::processFramedByte(PeerSlot &peer, uint8_t b) {
+  if (peer.rx_buffer_pos < 2) {
     // waiting for magic word
-    if ((_rx_buffer_pos == 0 && b == ((BRIDGE_PACKET_MAGIC >> 8) & 0xFF)) ||
-        (_rx_buffer_pos == 1 && b == (BRIDGE_PACKET_MAGIC & 0xFF))) {
-      _rx_buffer[_rx_buffer_pos++] = b;
+    if ((peer.rx_buffer_pos == 0 && b == ((BRIDGE_PACKET_MAGIC >> 8) & 0xFF)) ||
+        (peer.rx_buffer_pos == 1 && b == (BRIDGE_PACKET_MAGIC & 0xFF))) {
+      peer.rx_buffer[peer.rx_buffer_pos++] = b;
     } else {
-      _rx_buffer_pos = 0;
+      peer.rx_buffer_pos = 0;
       if (b == ((BRIDGE_PACKET_MAGIC >> 8) & 0xFF)) {
-        _rx_buffer[_rx_buffer_pos++] = b;
+        peer.rx_buffer[peer.rx_buffer_pos++] = b;
       }
     }
     return;
   }
 
-  _rx_buffer[_rx_buffer_pos++] = b;
-  if (_rx_buffer_pos < 4) return;
+  peer.rx_buffer[peer.rx_buffer_pos++] = b;
+  if (peer.rx_buffer_pos < 4) return;
 
-  uint16_t len = (_rx_buffer[2] << 8) | _rx_buffer[3];
+  uint16_t len = (peer.rx_buffer[2] << 8) | peer.rx_buffer[3];
   if (len > (MAX_TRANS_UNIT + 1)) {
-    BRIDGE_DEBUG_PRINTLN("RX invalid length %d, resetting\n", len);
-    _rx_buffer_pos = 0;
+    BRIDGE_DEBUG_PRINTLN("[peer %d] RX invalid length %d, resetting\n", peerIndex(peer), len);
+    peer.rx_buffer_pos = 0;
     return;
   }
 
-  if (_rx_buffer_pos != len + OVERHEAD) return;  // still accumulating
+  if (peer.rx_buffer_pos != len + OVERHEAD) return;  // still accumulating
 
-  uint16_t received_checksum = (_rx_buffer[4 + len] << 8) | _rx_buffer[5 + len];
-  if (!validateChecksum(_rx_buffer + 4, len, received_checksum)) {
-    BRIDGE_DEBUG_PRINTLN("RX checksum mismatch, rcv=0x%04x\n", received_checksum);
-    _rx_buffer_pos = 0;
+  uint16_t received_checksum = (peer.rx_buffer[4 + len] << 8) | peer.rx_buffer[5 + len];
+  if (!validateChecksum(peer.rx_buffer + 4, len, received_checksum)) {
+    BRIDGE_DEBUG_PRINTLN("[peer %d] RX checksum mismatch, len=%d, rcv=0x%04x\n", peerIndex(peer), len, received_checksum);
+    peer.rx_buffer_pos = 0;
     return;
   }
 
-  // Any valid frame at all -- ping, pong, or a real packet -- proves the peer
-  // is alive. See the _last_rx_at field comment in IpBridge.h for why this
-  // isn't scoped to pongs specifically.
-  _last_rx_at = millis();
+  // Any valid frame at all -- ping, pong, or a real packet -- proves this
+  // peer is alive.
+  peer.last_rx_at = millis();
 
   // Client only: this receipt already proves the link is alive in both
   // directions (we sent/received *something*), so push the next scheduled
@@ -757,41 +835,41 @@ void IpBridge::processFramedByte(uint8_t b) {
   // on receive can't cause that: it only skips a ping when we've already
   // heard from the peer recently, which is exactly when skipping is safe.
   if (!_is_server) {
-    _next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
+    peer.next_ping_at = millis() + IP_BRIDGE_PING_INTERVAL_MS;
   }
 
-  if (len == 1 && _rx_buffer[4] == HEARTBEAT_PING) {
-    BRIDGE_DEBUG_PRINTLN("Received heartbeat ping, replying with pong\n");
-#ifdef ESPNOW_BRIDGE_RADIO
+  if (len == 1 && peer.rx_buffer[4] == HEARTBEAT_PING) {
+    BRIDGE_DEBUG_PRINTLN("[peer %d] Received heartbeat ping, replying with pong\n", peerIndex(peer));
+#ifdef IP_BRIDGE_HAS_STATUS_LED
     radio_driver.indicateIpPing();
 #endif
     uint8_t pong = HEARTBEAT_PONG;
-    sendFramed(&pong, 1);
-  } else if (len == 1 && _rx_buffer[4] == HEARTBEAT_PONG) {
-    BRIDGE_DEBUG_PRINTLN("Received heartbeat pong\n");
-#ifdef ESPNOW_BRIDGE_RADIO
+    sendFramed(peer, &pong, 1);
+  } else if (len == 1 && peer.rx_buffer[4] == HEARTBEAT_PONG) {
+    BRIDGE_DEBUG_PRINTLN("[peer %d] Received heartbeat pong\n", peerIndex(peer));
+#ifdef IP_BRIDGE_HAS_STATUS_LED
     radio_driver.indicatePongReceived();
 #endif
   } else {
-    BRIDGE_DEBUG_PRINTLN("RX, len=%d crc=0x%04x\n", len, received_checksum);
+    BRIDGE_DEBUG_PRINTLN("[peer %d] RX, len=%d crc=0x%04x\n", peerIndex(peer), len, received_checksum);
     mesh::Packet *pkt = _mgr->allocNew();
     if (pkt) {
-      if (pkt->readFrom(_rx_buffer + 4, len)) {
+      if (pkt->readFrom(peer.rx_buffer + 4, len)) {
         onPacketReceived(pkt);
       } else {
-        BRIDGE_DEBUG_PRINTLN("RX failed to parse packet\n");
+        BRIDGE_DEBUG_PRINTLN("[peer %d] RX failed to parse packet\n", peerIndex(peer));
         _mgr->free(pkt);
       }
     } else {
-      BRIDGE_DEBUG_PRINTLN("RX failed to allocate packet\n");
+      BRIDGE_DEBUG_PRINTLN("[peer %d] RX failed to allocate packet\n", peerIndex(peer));
     }
   }
 
-  _rx_buffer_pos = 0;
+  peer.rx_buffer_pos = 0;
 }
 
-void IpBridge::sendFramed(const uint8_t *payload, uint16_t len) {
-  if (_state != State::CONNECTED) return;
+void IpBridge::sendFramed(PeerSlot &peer, const uint8_t *payload, uint16_t len) {
+  if (peer.state != State::CONNECTED) return;
 
   uint8_t buffer[MAX_PACKET_SIZE];
   buffer[0] = (BRIDGE_PACKET_MAGIC >> 8) & 0xFF;
@@ -812,36 +890,47 @@ void IpBridge::sendFramed(const uint8_t *payload, uint16_t len) {
   // send() syscall still take real wall-clock time worth measuring
   // directly rather than assuming "non-blocking" means "instant".
   unsigned long t0 = millis();
-  int ret = mbedtls_ssl_write(_ssl, buffer, len + OVERHEAD);
+  int ret = mbedtls_ssl_write(&peer.ssl, buffer, len + OVERHEAD);
   unsigned long dt = millis() - t0;
-  BRIDGE_DEBUG_PRINTLN("sendFramed: mbedtls_ssl_write took %lums (ret=%d)\n", dt, ret);
+  BRIDGE_DEBUG_PRINTLN("[peer %d] sendFramed: len=%d crc=0x%04x, mbedtls_ssl_write took %lums (ret=%d)\n",
+                       peerIndex(peer), len, checksum, dt, ret);
   if (ret < 0 && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_write error %d\n", ret);
-    teardownConnection(true);
+    BRIDGE_DEBUG_PRINTLN("[peer %d] mbedtls_ssl_write error %d\n", peerIndex(peer), ret);
+    teardownConnection(peer, true);
   }
 }
 
 void IpBridge::sendPacket(mesh::Packet *packet) {
-  if (_state != State::CONNECTED) return;
   if (!packet) {
     BRIDGE_DEBUG_PRINTLN("TX invalid packet pointer\n");
     return;
   }
+  if (!anyPeerConnected()) return;
 
-  if (!_tx_seen.wasSeen(packet)) {
-    _tx_seen.markSeen(packet);
-
-    uint8_t sizing_buffer[MAX_TRANS_UNIT + 1];
-    uint16_t len = packet->writeTo(sizing_buffer);
-    if (len > (MAX_TRANS_UNIT + 1)) {
-      BRIDGE_DEBUG_PRINTLN("TX packet too large (payload=%d, max=%d)\n", len, MAX_TRANS_UNIT + 1);
-      return;
-    }
-
-    BRIDGE_DEBUG_PRINTLN("TX, len=%d crc=0x%04x\n", len, fletcher16(sizing_buffer, len));
-    sendFramed(sizing_buffer, len);
-  } else {
+  if (_tx_seen.wasSeen(packet)) {
     BRIDGE_DEBUG_PRINTLN("TX suppressed (already seen), len=%d\n", packet->getRawLength());
+    return;
+  }
+  _tx_seen.markSeen(packet);
+
+  uint8_t sizing_buffer[MAX_TRANS_UNIT + 1];
+  uint16_t len = packet->writeTo(sizing_buffer);
+  if (len > (MAX_TRANS_UNIT + 1)) {
+    BRIDGE_DEBUG_PRINTLN("TX packet too large (payload=%d, max=%d)\n", len, MAX_TRANS_UNIT + 1);
+    return;
+  }
+
+  BRIDGE_DEBUG_PRINTLN("TX, len=%d crc=0x%04x\n", len, fletcher16(sizing_buffer, len));
+
+  // Every connected peer gets the same packet -- both FLOOD and DIRECT
+  // traffic. See class doc comment: mesh-layer encryption already protects
+  // DIRECT payload content from a peer it wasn't addressed to, so this is a
+  // bandwidth tradeoff, not a plaintext leak, and needs no per-destination
+  // routing here.
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (_peers[i].state == State::CONNECTED) {
+      sendFramed(_peers[i], sizing_buffer, len);
+    }
   }
 }
 
@@ -852,37 +941,41 @@ void IpBridge::onPacketReceived(mesh::Packet *packet) {
 void IpBridge::loop() {
   if (!_initialized) return;
 
-  // Server: always check for a new incoming connection, regardless of
-  // current state -- the listening socket stays live the whole time (real
-  // TCP accept() never touches it), which is what lets a fresh, legitimately
-  // re-authenticating peer get in via the challenger path even while an old
-  // session is still (stale but) technically CONNECTED. See pollListening().
+  // Server: always check for a new incoming connection, regardless of any
+  // slot's current state -- the listening socket stays live the whole time
+  // (real TCP accept() never touches it), which is what lets a fresh,
+  // legitimately re-authenticating peer get in via the challenger path even
+  // while every slot is still (stale but) technically CONNECTED. See
+  // pollListening().
   if (_is_server) {
     pollListening();
     if (_challenger_active) pollChallengerHandshake();
   }
 
-  switch (_state) {
-    case State::TCP_CONNECTING:
-      pollTcpConnecting();
-      break;
-    case State::HANDSHAKING:
-      // Throttled: calling mbedtls_ssl_handshake() on every single loop()
-      // tick is unnecessary overhead when nothing new has arrived. See
-      // _next_handshake_poll_at in IpBridge.h.
-      if ((int32_t)(millis() - _next_handshake_poll_at) >= 0) {
-        pollHandshake();
-        _next_handshake_poll_at = millis() + IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS;
-      }
-      break;
-    case State::CONNECTED:
-      pollConnectedIO();
-      break;
-    case State::RECONNECT_WAIT:
-      if ((int32_t)(millis() - _next_action_at) >= 0) startConnect();
-      break;
-    default:
-      break;
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    PeerSlot &peer = _peers[i];
+    switch (peer.state) {
+      case State::TCP_CONNECTING:
+        pollTcpConnecting();  // client (_peers[0]) only
+        break;
+      case State::HANDSHAKING:
+        // Throttled: calling mbedtls_ssl_handshake() on every single loop()
+        // tick is unnecessary overhead when nothing new has arrived. See
+        // next_handshake_poll_at in IpBridge.h.
+        if ((int32_t)(millis() - peer.next_handshake_poll_at) >= 0) {
+          pollHandshake(peer);
+          peer.next_handshake_poll_at = millis() + IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS;
+        }
+        break;
+      case State::CONNECTED:
+        pollConnectedIO(peer);
+        break;
+      case State::RECONNECT_WAIT:
+        if ((int32_t)(millis() - peer.next_action_at) >= 0) startConnect();  // client (_peers[0]) only
+        break;
+      default:
+        break;
+    }
   }
 }
 
