@@ -481,6 +481,9 @@ public:
     ip_bridge.formatStatus(reply);
     return true;
   }
+  void disconnectIpPeer(const char *identity) override {
+    ip_bridge.disconnectPeerByIdentity(identity);
+  }
 #endif
 #if !defined(WITH_BRIDGE) && defined(ESPNOW_BRIDGE_RADIO)
   void restartBridge() override {

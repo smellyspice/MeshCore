@@ -182,9 +182,15 @@ private:
       def("secret", _parent->ip_secret, sizeof(_parent->ip_secret)); // this node's own PSK key, when acting as client
       char name[16];
       for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
-        sprintf(name, "peer%d_id", i);
+        // Key names must be pure letters/underscore -- ConfigSerializer's
+        // tokenizer (is_key_char()) doesn't accept digits in keys, so an
+        // index suffix has to be a letter ('a', 'b', ...), not '0', '1', ...
+        // (confirmed live: a digit-suffixed key round-trips through WRITE
+        // fine but silently fails to match back on READ after reboot).
+        char idx = (char)('a' + i);
+        sprintf(name, "peer%c_id", idx);
         def(name, _parent->ip_peers[i].identity, sizeof(_parent->ip_peers[i].identity));
-        sprintf(name, "peer%d_secret", i);
+        sprintf(name, "peer%c_secret", idx);
         def(name, _parent->ip_peers[i].secret, sizeof(_parent->ip_peers[i].secret));
       }
     }
@@ -379,6 +385,20 @@ public:
   virtual void restartBridge() {
     // no op by default
   };
+
+#ifdef WITH_IP_BRIDGE
+  // Fires when a specific peer identity's credential is removed via
+  // 'ip.peer.remove' -- unlike restartBridge() (which tears down and
+  // reinitializes the whole WiFi/ESP-NOW/IpBridge stack, expensive and, on
+  // at least one board, capable of crashing if called twice in quick
+  // succession -- see planning/ip-bridge-per-peer-identity.md), this only
+  // needs to close that ONE peer's TLS session if it happens to be live
+  // right now, so a revoked credential is cut off immediately rather than
+  // just failing its next reconnect attempt. No-op by default.
+  virtual void disconnectIpPeer(const char *identity) {
+    // no op by default
+  };
+#endif
 
   // For 'get ip.status' -- writes a short human-readable summary into
   // 'reply' (same no-size-param convention as formatStatsReply() etc) and

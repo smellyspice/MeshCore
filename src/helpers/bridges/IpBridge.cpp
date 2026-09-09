@@ -224,6 +224,17 @@ const char* IpBridge::connectedPeerIdentity(int idx) const {
   return peer.identity;
 }
 
+void IpBridge::disconnectPeerByIdentity(const char *identity) {
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    PeerSlot &peer = _peers[i];
+    if (peer.state == State::CONNECTED && strcmp(peer.identity, identity) == 0) {
+      BRIDGE_DEBUG_PRINTLN("[peer %d] Revoked, disconnecting\n", i);
+      teardownConnection(peer, false);
+      return;
+    }
+  }
+}
+
 // Shared setup for any slot (a real peer slot, or the challenger): a fresh
 // mbedtls_ssl_context bound to an already-non-blocking fd. f_recv_timeout is
 // deliberately NULL -- this makes mbedTLS fall back to the plain non-blocking

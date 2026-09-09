@@ -121,6 +121,15 @@ public:
   const char* connectedPeerIdentity(int idx) const;
   int peerCount() const { return MAX_IP_PEERS; }
 
+  // Immediately closes whichever CONNECTED slot (if any) is currently
+  // authenticated as the given identity -- for 'ip.peer.remove', so a
+  // revoked credential cuts off a live session right away instead of just
+  // failing its next reconnect attempt. Only tears down that one slot's
+  // TLS/TCP state (same as a normal dead-link teardown) -- does NOT touch
+  // WiFi/ESP-NOW, unlike restartBridge(), which is the whole point: calling
+  // this repeatedly (e.g. removing several peers back to back) is safe.
+  void disconnectPeerByIdentity(const char *identity);
+
 private:
   enum class State : uint8_t {
     IDLE,           // slot empty / not initialized

@@ -821,7 +821,12 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       } else {
         StrHelper::strncpy(_prefs->ip_peers[idx].identity, id, sizeof(_prefs->ip_peers[idx].identity));
         StrHelper::strncpy(_prefs->ip_peers[idx].secret, secret, sizeof(_prefs->ip_peers[idx].secret));
-        _callbacks->restartBridge();
+        // No restartBridge() here -- the PSK lookup reads _prefs->ip_peers[]
+        // fresh on every handshake, so a new/updated credential is already
+        // live for the next connection attempt. Restarting the whole
+        // WiFi/ESP-NOW/IpBridge stack isn't needed, and doing it repeatedly
+        // (e.g. registering several peers back to back) has been observed to
+        // crash at least one board -- see planning/ip-bridge-per-peer-identity.md.
         savePrefs();
         strcpy(reply, "OK");
       }
@@ -838,7 +843,9 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       }
     }
     if (found) {
-      _callbacks->restartBridge();
+      // Targeted disconnect of just this identity's live session (if any) --
+      // not restartBridge(), same reasoning as ip.peer.add above.
+      _callbacks->disconnectIpPeer(id);
       savePrefs();
       strcpy(reply, "OK");
     } else {
