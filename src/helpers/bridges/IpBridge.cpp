@@ -63,9 +63,6 @@ extern NullRadio radio_driver;
 // the OS's own SYN retry timeout, which can be tens of seconds.
 #define IP_BRIDGE_TCP_CONNECT_TIMEOUT_MS 5000
 #endif
-#ifndef IP_BRIDGE_PSK_IDENTITY
-#define IP_BRIDGE_PSK_IDENTITY       "meshcore-bridge"  // not secret, just an identifier
-#endif
 #ifndef IP_BRIDGE_KEEPALIVE_IDLE_SECS
 #define IP_BRIDGE_KEEPALIVE_IDLE_SECS  30   // start probing after this long idle
 #endif
@@ -109,8 +106,8 @@ static uint32_t reconnectDelayFor(uint8_t consecutive_failures) {
   return delay > IP_BRIDGE_RECONNECT_MAX_MS ? IP_BRIDGE_RECONNECT_MAX_MS : delay;
 }
 
-IpBridge::IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc)
-    : BridgeBase(prefs, mgr, rtc) {
+IpBridge::IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc, const mesh::LocalIdentity *self_id)
+    : BridgeBase(prefs, mgr, rtc), _self_id(self_id) {
   mbedtls_net_init(&_listen_fd);
   for (int i = 0; i < MAX_IP_PEERS; i++) {
     mbedtls_net_init(&_peers[i].conn_fd);
@@ -155,20 +152,76 @@ bool IpBridge::setupTlsConfig() {
   };
   mbedtls_ssl_conf_ciphersuites(&_ssl_conf, psk_ciphersuites);
 
-  // One shared secret for every peer -- same convention as ESPNowBridge's one
-  // shared bridge.secret for its whole segment, not a distinct identity per
-  // peer. Anyone holding ip.secret can connect as a peer; there's no per-peer
-  // accountability beyond source IP (see formatStatus()).
-  size_t secret_len = strlen(_prefs->ip_secret);
-  if (mbedtls_ssl_conf_psk(&_ssl_conf, (const unsigned char *)_prefs->ip_secret, secret_len,
-                            (const unsigned char *)IP_BRIDGE_PSK_IDENTITY,
-                            strlen(IP_BRIDGE_PSK_IDENTITY)) != 0) {
-    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_conf_psk failed\n");
-    return false;
+  if (_is_server) {
+    // Per-peer credentials: mbedTLS calls resolvePsk() once per handshake
+    // with whatever identity the connecting client presented, and it's
+    // resolvePsk()'s job to look that up against _prefs->ip_peers[] and set
+    // the matching secret -- see pskLookupTrampoline()/resolvePsk() below.
+    // A client presenting an identity with no registered credential simply
+    // fails the handshake (real access control, not "anyone holding the one
+    // shared secret gets in").
+    mbedtls_ssl_conf_psk_cb(&_ssl_conf, IpBridge::pskLookupTrampoline, this);
+  } else {
+    // Client role: present this node's own identity (so the server can look
+    // up the matching credential) and this node's own secret, registered
+    // against that identity on whichever server it dials.
+    char own_identity[9];
+    mesh::Utils::toHex(own_identity, _self_id->pub_key, 4);
+    size_t secret_len = strlen(_prefs->ip_secret);
+    if (mbedtls_ssl_conf_psk(&_ssl_conf, (const unsigned char *)_prefs->ip_secret, secret_len,
+                              (const unsigned char *)own_identity, strlen(own_identity)) != 0) {
+      BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_conf_psk failed\n");
+      return false;
+    }
   }
 
   _tls_conf_ready = true;
   return true;
+}
+
+int IpBridge::pskLookupTrampoline(void *ctx, mbedtls_ssl_context *ssl, const unsigned char *identity, size_t identity_len) {
+  return ((IpBridge *)ctx)->resolvePsk(ssl, identity, identity_len);
+}
+
+int IpBridge::resolvePsk(mbedtls_ssl_context *ssl, const unsigned char *identity, size_t identity_len) {
+  char id[9];
+  size_t n = identity_len < 8 ? identity_len : 8;
+  memcpy(id, identity, n);
+  id[n] = 0;
+
+  for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+    const NodePrefs::IpPeerCredential &cred = _prefs->ip_peers[i];
+    if (cred.identity[0] != 0 && strcmp(cred.identity, id) == 0) {
+      size_t secret_len = strlen(cred.secret);
+      if (mbedtls_ssl_set_hs_psk(ssl, (const unsigned char *)cred.secret, secret_len) != 0) {
+        BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_set_hs_psk failed for peer %s\n", id);
+        return -1;
+      }
+      rememberResolvedIdentity(ssl, id);
+      return 0;
+    }
+  }
+  BRIDGE_DEBUG_PRINTLN("PSK lookup: no registered credential for identity %s, rejecting\n", id);
+  return -1;
+}
+
+void IpBridge::rememberResolvedIdentity(mbedtls_ssl_context *ssl, const char *identity) {
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (&_peers[i].ssl == ssl) {
+      memcpy(_peers[i].identity, identity, sizeof(_peers[i].identity));
+      return;
+    }
+  }
+  if (&_challenger_ssl == ssl) {
+    memcpy(_challenger_identity, identity, sizeof(_challenger_identity));
+  }
+}
+
+const char* IpBridge::connectedPeerIdentity(int idx) const {
+  if (idx < 0 || idx >= MAX_IP_PEERS) return NULL;
+  const PeerSlot &peer = _peers[idx];
+  if (peer.state != State::CONNECTED || peer.identity[0] == 0) return NULL;
+  return peer.identity;
 }
 
 // Shared setup for any slot (a real peer slot, or the challenger): a fresh
@@ -331,10 +384,11 @@ void IpBridge::formatStatus(char *reply) const {
       if (peer.state == State::HANDSHAKING) {
         dp += sprintf(dp, "; peer %s attempting handshake...", peer_ip);
       } else if (peer.state == State::CONNECTED) {
+        const char *id = peer.identity[0] != 0 ? peer.identity : "?";
         if (peer.last_rx_at == 0) {
-          dp += sprintf(dp, "; peer %s connected, nothing received yet", peer_ip);
+          dp += sprintf(dp, "; peer %s [%s] connected, nothing received yet", peer_ip, id);
         } else {
-          dp += sprintf(dp, "; peer %s connected, last heard %lus ago", peer_ip, since_rx_secs);
+          dp += sprintf(dp, "; peer %s [%s] connected, last heard %lus ago", peer_ip, id, since_rx_secs);
         }
       }
     }
@@ -572,6 +626,7 @@ void IpBridge::pollListening() {
     }
 
     peer.rx_buffer_pos = 0;
+    peer.identity[0] = 0;  // resolved by the PSK callback during the handshake below
     peer.state = State::HANDSHAKING;
     peer.next_handshake_poll_at = 0;  // poll immediately on the next loop() tick
     peer.handshake_started_at = millis();
@@ -674,6 +729,7 @@ void IpBridge::pollChallengerHandshake() {
   peer.conn_fd = _challenger_fd;
   memcpy(peer.client_ip, _challenger_ip, _challenger_ip_len);
   peer.client_ip_len = _challenger_ip_len;
+  memcpy(peer.identity, _challenger_identity, sizeof(peer.identity));
 
   // Struct contents were moved into peer.ssl/peer.conn_fd above -- reset the
   // challenger slot to a fresh empty state without freeing (ownership of
@@ -681,6 +737,7 @@ void IpBridge::pollChallengerHandshake() {
   mbedtls_ssl_init(&_challenger_ssl);
   mbedtls_net_init(&_challenger_fd);
   _challenger_active = false;
+  _challenger_identity[0] = 0;
 
   // peer.ssl's bio was bound against &_challenger_fd's address; retarget it
   // to the now-promoted peer.conn_fd (same fd value, different storage
@@ -703,6 +760,7 @@ void IpBridge::teardownConnection(PeerSlot &peer, bool reconnect) {
   mbedtls_net_free(&peer.conn_fd);
   mbedtls_net_init(&peer.conn_fd);
   peer.rx_buffer_pos = 0;
+  peer.identity[0] = 0;
 
   if (_is_server) {
     // Free the slot -- it goes straight back to IDLE, ready for

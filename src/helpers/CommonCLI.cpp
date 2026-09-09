@@ -799,6 +799,51 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     _callbacks->restartBridge();
     savePrefs();
     strcpy(reply, "OK");
+  } else if (memcmp(config, "ip.peer.add ", 12) == 0) {
+    // usage: ip.peer.add <8-hex-char identity> <secret>
+    const char *rest = &config[12];
+    const char *sp = strchr(rest, ' ');
+    if (sp == NULL || (sp - rest) != 8) {
+      strcpy(reply, "Error: usage is ip.peer.add <8-hex-char-id> <secret>");
+    } else {
+      char id[9];
+      memcpy(id, rest, 8);
+      id[8] = 0;
+      const char *secret = sp + 1;
+      int free_idx = -1, match_idx = -1;
+      for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+        if (memcmp(_prefs->ip_peers[i].identity, id, 9) == 0) { match_idx = i; break; }
+        if (free_idx < 0 && _prefs->ip_peers[i].identity[0] == 0) free_idx = i;
+      }
+      int idx = match_idx >= 0 ? match_idx : free_idx;
+      if (idx < 0) {
+        strcpy(reply, "Error: peer table full, remove one first");
+      } else {
+        StrHelper::strncpy(_prefs->ip_peers[idx].identity, id, sizeof(_prefs->ip_peers[idx].identity));
+        StrHelper::strncpy(_prefs->ip_peers[idx].secret, secret, sizeof(_prefs->ip_peers[idx].secret));
+        _callbacks->restartBridge();
+        savePrefs();
+        strcpy(reply, "OK");
+      }
+    }
+  } else if (memcmp(config, "ip.peer.remove ", 15) == 0) {
+    const char *id = &config[15];
+    bool found = false;
+    for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+      if (memcmp(_prefs->ip_peers[i].identity, id, 8) == 0 && strlen(id) == 8) {
+        _prefs->ip_peers[i].identity[0] = 0;
+        _prefs->ip_peers[i].secret[0] = 0;
+        found = true;
+        break;
+      }
+    }
+    if (found) {
+      _callbacks->restartBridge();
+      savePrefs();
+      strcpy(reply, "OK");
+    } else {
+      strcpy(reply, "Error: no peer with that identity");
+    }
 #endif
 #ifdef WITH_MQTT_BRIDGE
   } else if (memcmp(config, "mqtt.enabled ", 13) == 0) {
@@ -1041,6 +1086,17 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     sprintf(reply, "> %d", (uint32_t)_prefs->ip_port);
   } else if (memcmp(config, "ip.secret", 9) == 0) {
     sprintf(reply, "> %s", _prefs->ip_secret);
+  } else if (memcmp(config, "ip.peer.list", 12) == 0) {
+    strcpy(reply, "> ");
+    bool any = false;
+    for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+      if (_prefs->ip_peers[i].identity[0] != 0) {
+        if (any) strcat(reply, ", ");
+        strcat(reply, _prefs->ip_peers[i].identity);
+        any = true;
+      }
+    }
+    if (!any) strcat(reply, "(none registered)");
   } else if (memcmp(config, "ip.status", 9) == 0) {
     strcpy(reply, "> ");
     if (!_callbacks->formatIpStatus(&reply[2])) {

@@ -242,6 +242,20 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
 #ifdef WITH_BRIDGE
   void putBridgeNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr, const void* src_bridge);
+#ifdef WITH_IP_BRIDGE
+  // Reconciles bridge_neighbours[]'s BRIDGE_VIA_IP entries against IpBridge's
+  // live, identity-authenticated connections every tick: an entry whose
+  // identity is still actually connected gets its heard_timestamp bumped to
+  // now (so it never appears stale while genuinely live); an entry whose
+  // identity is no longer connected -- link dropped, heartbeat timed out, or
+  // the bridge got repointed to a different peer entirely -- gets evicted
+  // immediately, rather than waiting out BRIDGE_NEIGHBOUR_FRESHNESS_SECS.
+  // Does not CREATE new entries (that still only happens via a real advert,
+  // in putBridgeNeighbour() -- this only refreshes/evicts what's already
+  // there, since a live connection alone only proves a 4-byte identity
+  // prefix, not enough to safely fabricate a full mesh::Identity).
+  void syncIpBridgeNeighbours();
+#endif
   void formatAllNeighborsReply(char* reply);
   // Looks up a DIRECT packet's next hop (path[0]) against the neighbour
   // tables. Returns the specific bridge if that identity has only ever been

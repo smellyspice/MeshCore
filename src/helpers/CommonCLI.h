@@ -61,10 +61,31 @@ public:
 #endif
 #ifdef WITH_IP_BRIDGE
   // IpBridge settings: host empty = server/listen mode, host set = client
-  // (dials out to it). Secret is a DTLS-PSK pre-shared key, unrelated to bridge_secret.
+  // (dials out to it).
   char ip_host[64];
   uint16_t ip_port = 0;
+  // Client role: this node's own PSK secret, registered against its own
+  // identity (see ip.peer.add on whichever server it dials) -- one secret is
+  // enough here since a client only ever has one relationship.
   char ip_secret[32];
+
+#ifndef MAX_IP_PEER_CREDENTIALS
+  // Server role only: how many distinct peer identities can be registered.
+  // Matches IpBridge.h's MAX_IP_PEERS (max simultaneous connections) since
+  // there's no point registering more credentials than could ever connect
+  // at once.
+  #define MAX_IP_PEER_CREDENTIALS 4
+#endif
+  // Server role: per-peer credentials, keyed by the connecting peer's own
+  // mesh identity (first 4 bytes of its pubkey, hex -- same prefix shown by
+  // 'neighbors.all' etc) instead of one secret shared by every peer. Empty
+  // identity = unused slot. Revoking one peer means clearing its slot here,
+  // without touching any other peer's credential.
+  struct IpPeerCredential {
+    char identity[9];  // 8 hex chars + NUL
+    char secret[32];
+  };
+  IpPeerCredential ip_peers[MAX_IP_PEER_CREDENTIALS];
 #endif
 #ifdef WITH_MQTT_BRIDGE
   // MQTTBridge settings -- a single broker you run/trust yourself (e.g. your
@@ -158,7 +179,14 @@ private:
     void structure() override {
       def("host", _parent->ip_host, sizeof(_parent->ip_host)); // empty = server/listen mode
       def("port", _parent->ip_port);
-      def("secret", _parent->ip_secret, sizeof(_parent->ip_secret)); // DTLS-PSK key
+      def("secret", _parent->ip_secret, sizeof(_parent->ip_secret)); // this node's own PSK key, when acting as client
+      char name[16];
+      for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+        sprintf(name, "peer%d_id", i);
+        def(name, _parent->ip_peers[i].identity, sizeof(_parent->ip_peers[i].identity));
+        sprintf(name, "peer%d_secret", i);
+        def(name, _parent->ip_peers[i].secret, sizeof(_parent->ip_peers[i].secret));
+      }
     }
   public:
     IpPrefs(NodePrefs* parent) : _parent(parent) { }
@@ -284,6 +312,10 @@ public:
 #ifdef WITH_IP_BRIDGE
     ip_host[0] = 0;
     ip_secret[0] = 0;
+    for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
+      ip_peers[i].identity[0] = 0;
+      ip_peers[i].secret[0] = 0;
+    }
 #endif
 #ifdef WITH_MQTT_BRIDGE
     mqtt_server[0] = 0;

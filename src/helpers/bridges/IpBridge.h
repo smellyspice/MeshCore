@@ -75,7 +75,12 @@
  */
 class IpBridge : public BridgeBase {
 public:
-  IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc);
+  // self_id: this node's own identity. Used two ways:
+  //  - Client role: presented as this connection's PSK identity (so the
+  //    server can look up which registered peer credential applies).
+  //  - Server role: not needed for auth (each connecting peer presents its
+  //    own identity instead), kept only for symmetry/future use.
+  IpBridge(NodePrefs *prefs, mesh::PacketManager *mgr, mesh::RTCClock *rtc, const mesh::LocalIdentity *self_id);
 
   void begin() override;
   void end() override;
@@ -107,6 +112,14 @@ public:
   // param, caller's buffer is trusted to be large enough). Lists every
   // non-idle peer slot on the server; single-session summary on the client.
   void formatStatus(char *reply) const;
+
+  // Server role only: the resolved identity (8 hex chars, or empty if not
+  // yet/no longer known) of whichever peer is CONNECTED on a given slot --
+  // lets callers (MyMesh's bridge_neighbours[] tracking) know exactly who is
+  // live on this bridge right now, instead of inferring it from adverts.
+  // Returns NULL if idx is out of range or that slot isn't CONNECTED.
+  const char* connectedPeerIdentity(int idx) const;
+  int peerCount() const { return MAX_IP_PEERS; }
 
 private:
   enum class State : uint8_t {
@@ -143,6 +156,12 @@ private:
     // Peer's source address (server role only) -- for formatStatus().
     unsigned char client_ip[16] = {0};
     size_t client_ip_len = 0;
+
+    // Server role only: which registered peer identity (8 hex chars)
+    // resolved during this slot's handshake -- set by the PSK callback,
+    // cleared on teardown. Empty on the client role (a client's one
+    // relationship is already known from ip_host, not looked up).
+    char identity[9] = {0};
 
     // Heartbeat / dead-link detection, tracked independently per peer so one
     // silent peer's timeout can't affect any other peer's session.
@@ -187,6 +206,12 @@ private:
   unsigned long _challenger_handshake_started_at = 0;
   unsigned char _challenger_ip[16];
   size_t _challenger_ip_len = 0;
+  // Resolved by the PSK callback during the challenger's handshake, same as
+  // a regular slot's 'identity' field -- copied onto whichever slot the
+  // challenger is promoted into on success (see pollChallengerHandshake()).
+  char _challenger_identity[9] = {0};
+
+  const mesh::LocalIdentity *_self_id;
 
   mbedtls_ssl_config _ssl_conf;
   mbedtls_ctr_drbg_context _ctr_drbg;
@@ -211,6 +236,16 @@ private:
   int peerIndex(const PeerSlot &peer) const { return (int)(&peer - _peers); }
 
   bool setupTlsConfig();
+  // Server role: mbedTLS calls this during a handshake with whatever
+  // identity string the connecting client presented. Looks it up against
+  // _prefs->ip_peers[], and on a match calls mbedtls_ssl_set_hs_psk() with
+  // that peer's own secret and stashes the resolved identity (see
+  // rememberResolvedIdentity()) so the eventual PeerSlot/challenger knows
+  // who it belongs to. Returns non-zero (handshake fails) on no match --
+  // this is the actual access-control check now, not a single shared secret.
+  static int pskLookupTrampoline(void *ctx, mbedtls_ssl_context *ssl, const unsigned char *identity, size_t identity_len);
+  int resolvePsk(mbedtls_ssl_context *ssl, const unsigned char *identity, size_t identity_len);
+  void rememberResolvedIdentity(mbedtls_ssl_context *ssl, const char *identity);
   void teardownConnection(PeerSlot &peer, bool reconnect);
   void scheduleReconnect();        // client-only: bump failure count, compute+log backoff, enter RECONNECT_WAIT
   void startListen();              // server: open+bind+listen the listening socket

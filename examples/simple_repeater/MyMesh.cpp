@@ -120,6 +120,34 @@ void MyMesh::putBridgeNeighbour(const mesh::Identity &id, uint32_t timestamp, fl
   entry->via = via;
 }
 
+#ifdef WITH_IP_BRIDGE
+void MyMesh::syncIpBridgeNeighbours() {
+  uint32_t now = getRTCClock()->getCurrentTime();
+  for (int i = 0; i < MAX_BRIDGE_NEIGHBOURS; i++) {
+    BridgeNeighbourInfo &entry = bridge_neighbours[i];
+    if (entry.heard_timestamp == 0 || entry.via != BRIDGE_VIA_IP) continue;
+
+    char entry_hex[9];
+    mesh::Utils::toHex(entry_hex, entry.id.pub_key, 4);
+
+    bool still_connected = false;
+    for (int p = 0; p < ip_bridge.peerCount(); p++) {
+      const char *peer_id = ip_bridge.connectedPeerIdentity(p);
+      if (peer_id != NULL && strcmp(peer_id, entry_hex) == 0) {
+        still_connected = true;
+        break;
+      }
+    }
+
+    if (still_connected) {
+      entry.heard_timestamp = now;  // confirmed live right now, no need to wait for its next advert
+    } else {
+      entry.heard_timestamp = 0;    // evict: this identity isn't on any connected peer any more
+    }
+  }
+}
+#endif
+
 void* MyMesh::findBridgeOnlyNextHop(const uint8_t* hash, uint8_t hash_size) const {
   // Any RF sighting, however old, disqualifies -- a node can be both RF- and
   // bridge-reachable, so decline rather than risk a wrong redirect.
@@ -1167,7 +1195,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
       , espnow_bridge(&_prefs, _mgr, &rtc)
 #endif
 #ifdef WITH_IP_BRIDGE
-      , ip_bridge(&_prefs, _mgr, &rtc)
+      , ip_bridge(&_prefs, _mgr, &rtc, &self_id)
 #endif
 #ifdef WITH_MQTT_BRIDGE
       , mqtt_bridge(&_prefs, _mgr, &rtc, &self_id)
@@ -1738,6 +1766,7 @@ void MyMesh::loop() {
 #endif
   ip_bridge.loop();
   flushPendingIpSends();
+  syncIpBridgeNeighbours();
 #endif
 #ifdef WITH_MQTT_BRIDGE
   mqtt_bridge.loop();
