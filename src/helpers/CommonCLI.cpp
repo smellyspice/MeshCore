@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <ctype.h>
+#include <strings.h>
 #include "CommonCLI.h"
 #include "TxtDataHelpers.h"
 #include "AdvertDataHelpers.h"
@@ -809,10 +811,15 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       char id[9];
       memcpy(id, rest, 8);
       id[8] = 0;
+      // Normalize to uppercase -- the client always presents its identity in
+      // uppercase hex (mesh::Utils::toHex's convention), and the PSK lookup
+      // is now case-insensitive, but storing a canonical case here keeps
+      // ip.peer.list's display consistent regardless of how it was typed.
+      for (int c = 0; c < 8; c++) id[c] = toupper((unsigned char)id[c]);
       const char *secret = sp + 1;
       int free_idx = -1, match_idx = -1;
       for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
-        if (memcmp(_prefs->ip_peers[i].identity, id, 9) == 0) { match_idx = i; break; }
+        if (_prefs->ip_peers[i].identity[0] != 0 && strcasecmp(_prefs->ip_peers[i].identity, id) == 0) { match_idx = i; break; }
         if (free_idx < 0 && _prefs->ip_peers[i].identity[0] == 0) free_idx = i;
       }
       int idx = match_idx >= 0 ? match_idx : free_idx;
@@ -835,7 +842,7 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     const char *id = &config[15];
     bool found = false;
     for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
-      if (memcmp(_prefs->ip_peers[i].identity, id, 8) == 0 && strlen(id) == 8) {
+      if (strlen(id) == 8 && strcasecmp(_prefs->ip_peers[i].identity, id) == 0) {
         _prefs->ip_peers[i].identity[0] = 0;
         _prefs->ip_peers[i].secret[0] = 0;
         found = true;

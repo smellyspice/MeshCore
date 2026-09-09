@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <strings.h>
 
 // Optional cross-cutting hook: boards whose radio_driver knows how to show
 // connect/disconnect/ping/pong status on an LED get that status lit up here.
@@ -191,7 +192,7 @@ int IpBridge::resolvePsk(mbedtls_ssl_context *ssl, const unsigned char *identity
 
   for (int i = 0; i < MAX_IP_PEER_CREDENTIALS; i++) {
     const NodePrefs::IpPeerCredential &cred = _prefs->ip_peers[i];
-    if (cred.identity[0] != 0 && strcmp(cred.identity, id) == 0) {
+    if (cred.identity[0] != 0 && strcasecmp(cred.identity, id) == 0) {
       size_t secret_len = strlen(cred.secret);
       if (mbedtls_ssl_set_hs_psk(ssl, (const unsigned char *)cred.secret, secret_len) != 0) {
         BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_set_hs_psk failed for peer %s\n", id);
@@ -227,7 +228,7 @@ const char* IpBridge::connectedPeerIdentity(int idx) const {
 void IpBridge::disconnectPeerByIdentity(const char *identity) {
   for (int i = 0; i < MAX_IP_PEERS; i++) {
     PeerSlot &peer = _peers[i];
-    if (peer.state == State::CONNECTED && strcmp(peer.identity, identity) == 0) {
+    if (peer.state == State::CONNECTED && strcasecmp(peer.identity, identity) == 0) {
       BRIDGE_DEBUG_PRINTLN("[peer %d] Revoked, disconnecting\n", i);
       teardownConnection(peer, false);
       return;
