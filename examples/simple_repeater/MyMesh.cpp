@@ -99,6 +99,12 @@ void MyMesh::putBridgeNeighbour(const mesh::Identity &id, uint32_t timestamp, fl
 #ifdef WITH_IP_BRIDGE
   if (src_bridge == &ip_bridge) via = BRIDGE_VIA_IP;
 #endif
+#if defined(ESPNOW_BRIDGE_RADIO) && !defined(WITH_ESPNOW_BRIDGE)
+  // This board has no separate ESPNowBridge object -- ESP-NOW IS its one and
+  // only radio (radio_driver itself), so anything routed here via that radio
+  // is unambiguously "via ESPNOW", not BRIDGE_VIA_UNKNOWN.
+  if (src_bridge == (const void*)&radio_driver) via = BRIDGE_VIA_ESPNOW;
+#endif
 
   // find existing entry, else use least recently updated
   uint32_t oldest_timestamp = 0xFFFFFFFF;
@@ -968,9 +974,19 @@ void MyMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32
         putBridgeNeighbour(id, timestamp, packet->getSNR(), packet->_src_bridge);
       } else
 #endif
+#if defined(WITH_BRIDGE) && defined(ESPNOW_BRIDGE_RADIO) && !defined(WITH_ESPNOW_BRIDGE)
+      // ESP-NOW is this board's only radio (no separate bridge object), so
+      // packet->_src_bridge is never set for anything heard here -- without
+      // this, every peer heard this way (e.g. a room server) was invisible
+      // to bridge_neighbours/'neighbors.all' unless it happened to be
+      // ADV_TYPE_REPEATER, the only type the plain neighbours[] path below
+      // recognizes.
+      putBridgeNeighbour(id, timestamp, packet->getSNR(), (const void*)&radio_driver);
+#else
       if (parser.getType() == ADV_TYPE_REPEATER) { // just keep neigbouring Repeaters
         putNeighbour(id, timestamp, packet->getSNR());
       }
+#endif
     }
   }
 }
