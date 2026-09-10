@@ -579,12 +579,6 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
         }
       }
     }
-
-    if (getUnsyncedCount(client) == 0) {
-      // nothing queued for them at all this visit -- still give a bot-like acknowledgement
-      // rather than silence, staggered behind the login response above
-      sendCaughtUpNotice(client, PUSH_NOTIFY_DELAY_MILLIS);
-    }
   }
 }
 
