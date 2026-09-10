@@ -164,6 +164,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   void savePosts();
   void loadPosts();
   void pushPostToClient(ClientInfo* client, PostInfo& post);
+  void sendCaughtUpNotice(ClientInfo* client, uint32_t delay_millis = 0);
   uint8_t getUnsyncedCount(ClientInfo* client);
   bool processAck(const uint8_t *data);
   mesh::Packet* createSelfAdvert();

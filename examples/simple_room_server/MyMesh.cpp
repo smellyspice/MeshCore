@@ -25,6 +25,11 @@
 
 #define LAZY_CONTACTS_WRITE_DELAY    5000
 
+#define ROOM_PUSH_MAX_FAILURES       3   // after this many missed ACKs (or a completed catch-up), stop pushing until client re-connects
+
+// TODO: wording still under review
+#define CAUGHT_UP_NOTICE_TEXT        "[EchoBoard] You're caught up! No more archived messages. Reconnect later for a fresh batch."
+
 struct ServerStats {
   uint16_t batt_milli_volts;
   uint16_t curr_tx_queue_len;
@@ -236,6 +241,37 @@ void MyMesh::pushPostToClient(ClientInfo *client, PostInfo &post) {
   }
 }
 
+void MyMesh::sendCaughtUpNotice(ClientInfo *client, uint32_t delay_millis) {
+  MESH_DEBUG_PRINTLN("room.post: sendCaughtUpNotice to %02X", (uint32_t)client->id.pub_key[0]);
+  int len = 0;
+  uint32_t now = getRTCClock()->getCurrentTimeUnique();
+  memcpy(&reply_data[len], &now, 4);
+  len += 4;
+
+  uint8_t attempt;
+  getRNG()->random(&attempt, 1);
+  reply_data[len++] = (TXT_TYPE_SIGNED_PLAIN << 2) | (attempt & 3); // 'signed' plain text
+
+  // encode prefix of OUR pub_key, marking this as a system notice, not a real post's author
+  memcpy(&reply_data[len], self_id.pub_key, 4);
+  len += 4;
+
+  int text_len = strlen(CAUGHT_UP_NOTICE_TEXT);
+  memcpy(&reply_data[len], CAUGHT_UP_NOTICE_TEXT, text_len);
+  len += text_len;
+
+  // fire-and-forget: NOT tracked via pending_ack/sync_since -- purely a courtesy notice,
+  // not worth spending a retry's airtime on if it's lost.
+  auto notice = createDatagram(PAYLOAD_TYPE_TXT_MSG, client->id, client->shared_secret, reply_data, len);
+  if (notice) {
+    if (client->out_path_len == OUT_PATH_UNKNOWN) {
+      sendFloodScoped(default_scope, notice, delay_millis, _prefs.path_hash_mode + 1);
+    } else {
+      sendDirect(notice, client->out_path, client->out_path_len, delay_millis);
+    }
+  }
+}
+
 uint8_t MyMesh::getUnsyncedCount(ClientInfo *client) {
   uint8_t count = 0;
   for (int k = 0; k < MAX_UNSYNCED_POSTS; k++) {
@@ -254,6 +290,13 @@ bool MyMesh::processAck(const uint8_t *data) {
       client->extra.room.pending_ack = 0; // clear this, so next push can happen
       client->extra.room.push_failures = 0;
       client->extra.room.sync_since = client->extra.room.push_post_timestamp; // advance Client's SINCE timestamp, to sync next post
+
+      if (getUnsyncedCount(client) == 0) {
+        // fully caught up -- let them know, then stop pushing until they check back in
+        // (their own next login/keep-alive will report a fresh sync_since and reset this)
+        sendCaughtUpNotice(client);
+        client->extra.room.push_failures = ROOM_PUSH_MAX_FAILURES;
+      }
       return true;
     }
   }
@@ -535,6 +578,12 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
           sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
         }
       }
+    }
+
+    if (getUnsyncedCount(client) == 0) {
+      // nothing queued for them at all this visit -- still give a bot-like acknowledgement
+      // rather than silence, staggered behind the login response above
+      sendCaughtUpNotice(client, PUSH_NOTIFY_DELAY_MILLIS);
     }
   }
 }
@@ -1183,7 +1232,7 @@ void MyMesh::loop() {
     auto client = acl.getClientByIdx(next_client_idx);
     bool did_push = false;
     if (client->extra.room.pending_ack == 0 && client->last_activity != 0 &&
-        client->extra.room.push_failures < 3) { // not already waiting for ACK, AND not evicted, AND retries not max
+        client->extra.room.push_failures < ROOM_PUSH_MAX_FAILURES) { // not already waiting for ACK, AND not evicted, AND retries not max
       MESH_DEBUG_PRINTLN("loop - checking for client %02X", (uint32_t)client->id.pub_key[0]);
       uint32_t now = getRTCClock()->getCurrentTime();
       for (int k = 0, idx = next_post_idx; k < MAX_UNSYNCED_POSTS; k++) {
