@@ -97,7 +97,11 @@ void setup() {
 
   // send out initial zero hop Advertisement to the mesh
 #if ENABLE_ADVERT_ON_BOOT == 1
-  the_mesh.sendSelfAdvertisement(16000, false);
+  // +/- 10s random jitter around the 16s base delay -- several of these
+  // boards sharing one ESP-NOW channel/hub all reboot at the same wall-clock
+  // moment (e.g. a shared power cycle) and were otherwise guaranteed to
+  // advert in the same instant every time.
+  the_mesh.sendSelfAdvertisement(the_mesh.getRNG()->nextInt(6000, 26001), false);
 #endif
 
   board.onBootComplete();
