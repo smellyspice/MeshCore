@@ -545,6 +545,14 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
       memcpy(client->shared_secret, secret, PUB_KEY_SIZE);
 
       dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
+    } else {
+      // Already-known client, reconnecting with blank password. Clear any
+      // stale "caught up, stop pushing" state from a prior visit -- otherwise
+      // a client marked done never gets served again until evicted/rebooted,
+      // even though new posts keep arriving. A fresh login is exactly the
+      // signal that they're back and should be checked for new posts.
+      client->extra.room.push_failures = 0;
+      client->extra.room.pending_ack = 0;
     }
 
     if (packet->isRouteFlood()) {
