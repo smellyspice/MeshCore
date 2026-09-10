@@ -147,6 +147,15 @@
     <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel your WiFi access point actually operates on — it doesn't get synced automatically. Make sure that AP is locked to a fixed channel rather than left on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until you update <code>bridge.channel</code> to match again.</div>
   </div>
 
+  <div class="role">
+    <h3>Multiple IP peers on one repeater (listening side only)</h3>
+    <p>Leaving <code>ip.host</code> empty makes this board a listener, and a listener can accept more than one peer at once — a remote repeater over the internet and a local no&#8209;LoRa gateway, say — each with its own revocable credential instead of everyone sharing one <code>ip.secret</code>:</p>
+    <pre class="cli"><span class="k">set</span> ip.peer.add &lt;8&#8209;hex&#8209;char id&gt; &lt;secret only this peer knows&gt;
+<span class="k">get</span> ip.peer.list
+<span class="k">set</span> ip.peer.remove &lt;id&gt;</pre>
+    <p>The id is the first 4 bytes of the connecting peer's public key (its <code>get public.key</code>, or shown in <code>ip.status</code> once connected). Matching is case&#8209;insensitive. Each connecting peer still presents its own identity via its own <code>ip.secret</code> on its side — this only changes how the listener resolves and authenticates them.</p>
+  </div>
+
   <div class="section-head"><div class="num">2</div><h2>Verify it's actually working</h2></div>
   <p>Don't just assume — these cover every hop:</p>
   <pre class="cli"><span class="k">get</span> wifi.status

@@ -165,6 +165,7 @@
 <span class="k">set</span> ip.port &lt;port&gt;
 <span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># TLS-PSK, must match the peer</span></pre>
     <div class="note"><strong>WiFi and ESP&#8209;NOW share one radio.</strong> <code>bridge.channel</code> must exactly match whichever channel this WiFi access point actually operates on — it doesn't get synced automatically. Lock that AP to a fixed channel rather than leaving it on auto-select; many routers pick a new channel on reboot or via automatic interference avoidance, which would silently break this until <code>bridge.channel</code> is updated to match again.</div>
+    <p>Leaving <code>ip.host</code> empty here makes this board a listener rather than a dialer, and a listener can hold more than one peer at once, each with its own credential instead of one shared <code>ip.secret</code> — see <a href="trifecta-setup.html">Trifecta setup</a>'s "Multiple IP peers" section, the CLI is identical here.</p>
   </div>
 
   <div class="section-head"><div class="num">3</div><h2>Verify it actually joined</h2></div>
