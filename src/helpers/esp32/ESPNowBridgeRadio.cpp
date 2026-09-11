@@ -28,10 +28,37 @@ static uint8_t rx_buf[256];
 static uint8_t last_rx_len = 0;
 
 // Broadcast ESP-NOW frames get no MAC-layer ACK/retry; unicast gets hardware
-// ACK + retry for free. This radio only ever talks to one paired repeater,
-// so once a valid frame's been heard from it, sends switch from broadcast to
-// unicast straight to its MAC. Falls back to broadcast until a peer's known.
+// ACK + retry for free. This board can have MULTIPLE peers talking to it at
+// once (e.g. this radio also backs a hub like EchoGate, fielding several
+// room-server/companion boards on the same ESP-NOW segment, not just a
+// single spoke's one paired repeater as originally assumed) -- so instead of
+// remembering just one MAC and overwriting it every time a different peer is
+// heard from (which silently made every other peer unreachable the moment
+// any one of them talked), a small table of known peers is kept, mirroring
+// src/helpers/bridges/ESPNowBridge.cpp's own MAX_KNOWN_PEERS design for the
+// same reason. Sending fans out: unicast-with-retry to every known peer in
+// turn, then (FLOOD/zero-hop-advert only) one extra broadcast pass to reach
+// anyone not yet individually learned -- same fan-out shape as
+// ESPNowBridge::advanceToNextPeerOrFinish(), just reimplemented here since
+// this class drives the mesh::Radio interface (one send at a time, polled via
+// isSendComplete()) rather than ESPNowBridge's own queued-bridge loop().
 //
+// Table sized for a real EchoBoard-style hub (5-10 peers), not
+// ESPNowBridge's 19 -- keeps per-packet worst-case fan-out time bounded (see
+// getEstAirtimeFor()) rather than scaling for a case this radio doesn't need
+// to support.
+static const uint8_t MAX_KNOWN_PEERS = 10;
+static uint8_t s_known_peers[MAX_KNOWN_PEERS][6];
+static uint8_t s_known_peer_count = 0;
+
+// Sentinel for "currently sending the broadcast pass" in the fan-out below,
+// distinct from any real index into s_known_peers.
+static const uint8_t PEER_IDX_BROADCAST = 0xFF;
+static uint8_t s_active_peer_idx = PEER_IDX_BROADCAST;
+static bool s_is_flood = false;
+static bool s_flood_broadcast_done = false;
+static bool s_advance_pending = false;  // deferred to loop(), see OnDataSent()
+
 // Retries are bounded by Dispatcher's own outbound_expiry (see
 // getEstAirtimeFor()) -- it gives up on the whole packet if isSendComplete()
 // doesn't go true in time. Live-measured (2026-08-26, real hardware, real
@@ -39,22 +66,21 @@ static uint8_t last_rx_len = 0;
 // callback lands in ~16-21ms, consistently -- not the old, unreconciled
 // "up to 13s" claim (see getEstAirtimeFor()). At ~21ms/attempt worst case,
 // 12 attempts costs roughly 12*21 + 11*TX_RETRY_DELAY_MS =~ 362ms worst
-// case, within budget below. Bumped 4 -> 6 -> 12 (a plain user-facing win:
-// retries are cheap and fast, so a lot more of them beats a visible timeout
-// error on a marginal link) -- observed live that some exchanges only
-// succeeded on attempt 3, and 4/4 failures were common enough to be the
-// primary complaint driving this whole investigation. The real root cause
-// looks like antenna/RF margin between this board and its paired repeater
-// (confirmed live: failures dropped sharply at close range), not something
-// fixable here -- this is a pragmatic mitigation for marginal links, not a
-// fix for the underlying link budget.
-static uint8_t s_peer_mac[6] = {0};
-static bool s_peer_known = false;
-
+// case per peer, within budget below. Bumped 4 -> 6 -> 12 (a plain
+// user-facing win: retries are cheap and fast, so a lot more of them beats a
+// visible timeout error on a marginal link) -- observed live that some
+// exchanges only succeeded on attempt 3, and 4/4 failures were common enough
+// to be the primary complaint driving this whole investigation. The real
+// root cause looks like antenna/RF margin between this board and its paired
+// repeater (confirmed live: failures dropped sharply at close range), not
+// something fixable here -- this is a pragmatic mitigation for marginal
+// links, not a fix for the underlying link budget. This ceiling applies
+// per-peer in the fan-out above, same as it always did for the single-peer
+// case.
 static uint8_t s_last_tx_buffer[MAX_ESPNOW_PACKET_SIZE];
 static size_t s_last_tx_len = 0;
 static uint8_t s_tx_attempt = 0;
-static const uint8_t MAX_TX_ATTEMPTS = 12;      // 1 initial + 11 retries
+static const uint8_t MAX_TX_ATTEMPTS = 12;      // 1 initial + 11 retries, per peer
 static const uint32_t TX_RETRY_DELAY_MS = 10;
 static bool s_retry_pending = false;
 static unsigned long s_retry_at = 0;
@@ -62,9 +88,18 @@ static unsigned long s_retry_at = 0;
 // Learning a peer's MAC happens in OnDataRecv() (WiFi driver task) but actual
 // esp_now_add_peer()/del_peer() calls are deferred to loop() (main task) --
 // same reasoning as the send retry above, don't call ESP-NOW APIs from
-// inside its own callbacks.
+// inside its own callbacks. Only one MAC can be "pending learn" at a time,
+// which is fine -- two never-before-seen peers transmitting in the same
+// handful of milliseconds is not a real scenario here.
 static uint8_t s_pending_learn_mac[6] = {0};
 static volatile bool s_pending_learn = false;
+
+static bool isKnownPeer(const uint8_t* mac) {
+  for (uint8_t i = 0; i < s_known_peer_count; i++) {
+    if (memcmp(s_known_peers[i], mac, 6) == 0) return true;
+  }
+  return false;
+}
 
 // Timing instrumentation for OnDataSent() latency -- added to actually
 // measure this instead of relying on old, unreconciled numbers in
@@ -126,6 +161,8 @@ static const uint32_t TIME_BEACON_MIN_PLAUSIBLE = FIRMWARE_BUILD_EPOCH;
 static const uint32_t TIME_APPLY_COOLDOWN_MS = 12UL * 60 * 60 * 1000;  // 12h
 static unsigned long s_last_time_applied_at = 0;  // millis(), 0 = never applied yet
 
+static void issueSendAttempt();  // defined near loop(), used by startSendRaw() above it
+
 static void handleTimeBeacon(const uint8_t* data, int len) {
   static const size_t TIME_PAYLOAD_SIZE = 4;
   if (len != (int)(BRIDGE_MAGIC_SIZE + BRIDGE_CHECKSUM_SIZE + TIME_PAYLOAD_SIZE)) return;
@@ -156,8 +193,9 @@ static void handleTimeBeacon(const uint8_t* data, int len) {
 // callback when data is sent
 static void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   unsigned long now = millis();
-  ESPNOW_DEBUG_PRINTLN("Send Status: %d (attempt %d, +%lums this attempt, +%lums total)",
-                       (int)status, (int)s_tx_attempt, now - s_attempt_started_at, now - s_send_started_at);
+  ESPNOW_DEBUG_PRINTLN("Send Status: %d (peer_idx=%d, attempt %d, +%lums this attempt, +%lums total)",
+                       (int)status, (int)s_active_peer_idx, (int)s_tx_attempt,
+                       now - s_attempt_started_at, now - s_send_started_at);
   if (status != ESP_NOW_SEND_SUCCESS && s_tx_attempt < MAX_TX_ATTEMPTS) {
     // Never call ESP-NOW APIs from inside this callback -- it runs on the
     // WiFi driver's own task, not the main loop. Just flag it; loop() (main
@@ -167,7 +205,11 @@ static void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     s_retry_at = millis() + TX_RETRY_DELAY_MS;
     return;  // not complete yet -- loop() will retry, then mark complete
   }
-  is_send_complete = true;
+  // This peer is done (succeeded, or exhausted its retries) -- move on to the
+  // next known peer (or the flood broadcast pass, or finish) in loop(), same
+  // "don't call ESP-NOW APIs from inside this callback" rule as the retry
+  // path above.
+  s_advance_pending = true;
 }
 
 static void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
@@ -204,7 +246,7 @@ static void OnDataRecv(const uint8_t *mac, const uint8_t *data, int len) {
   // peer (not a security boundary -- MAC spoofing is trivial on ESP-NOW --
   // just avoids latching onto noise). Actual peer registration happens in
   // loop() -- see s_pending_learn above.
-  if (!s_peer_known || memcmp(s_peer_mac, mac, 6) != 0) {
+  if (!s_pending_learn && !isKnownPeer(mac)) {
     memcpy(s_pending_learn_mac, mac, 6);
     s_pending_learn = true;
   }
@@ -300,13 +342,13 @@ void ESPNowBridgeRadio::setBridgeParams(uint8_t channel, const char* secret) {
     ESPNOW_DEBUG_PRINTLN("setBridgeParams: failed to add peer, channel=%d", s_channel);
   }
 
-  // Any previously-learned unicast peer was on the old channel/secret --
-  // stale now. Drop back to broadcast until a peer's re-learned on the new
-  // network.
-  if (s_peer_known) {
-    esp_now_del_peer(s_peer_mac);
-    s_peer_known = false;
+  // Any previously-learned unicast peers were on the old channel/secret --
+  // stale now. Drop back to broadcast-only until peers are re-learned on the
+  // new network.
+  for (uint8_t i = 0; i < s_known_peer_count; i++) {
+    esp_now_del_peer(s_known_peers[i]);
   }
+  s_known_peer_count = 0;
   s_pending_learn = false;
 }
 
@@ -439,27 +481,36 @@ bool ESPNowBridgeRadio::startSendRaw(const uint8_t* bytes, int len) {
 
   // A zero-hop advert (DIRECT route, no path) has no real destination --
   // it means "whoever's nearby, take note", the same as its inherently-
-  // broadcast behaviour on LoRa's RF layer. Unicasting it to just the
-  // known repeater peer (like every other packet type, correctly) would
-  // silence it to any other ESP-NOW peer that might be listening on the
-  // same channel. Detected directly off the still-unencrypted header/
+  // broadcast behaviour on LoRa's RF layer. It skips the known-peer fan-out
+  // entirely and goes straight to one broadcast, same as when no peers are
+  // known yet at all. Detected directly off the still-unencrypted header/
   // path-len bytes -- see Packet::writeTo() for the wire layout this
   // mirrors (byte 0 = header, byte 1 = path_len when route type isn't
   // one of the TRANSPORT_* variants, which a zero-hop advert never is).
   bool zero_hop_advert = (((bytes[0] >> PH_TYPE_SHIFT) & PH_TYPE_MASK) == PAYLOAD_TYPE_ADVERT)
                        && ((bytes[0] & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT)
                        && (bytes[1] == 0);
-  const uint8_t* dest = (s_peer_known && !zero_hop_advert) ? s_peer_mac : broadcastAddress;
-  esp_err_t result = esp_now_send(dest, buffer, s_last_tx_len);
-  if (result == ESP_OK) {
-    n_sent++;
-    ESPNOW_DEBUG_PRINTLN("Send success (%s)", (dest == broadcastAddress) ? "broadcast" : "unicast");
-    return true;
+  // Any FLOOD-route packet (route type 0 or 1 -- see PH_ROUTE_MASK) is
+  // inherently "for anyone listening", same as an advert -- not just this
+  // one remembered peer. This is the actual fix: previously only zero-hop
+  // adverts got broadcast, so a relayed FLOOD packet (e.g. a login request)
+  // silently reached only whichever peer happened to be "known" at the time,
+  // never the others.
+  uint8_t route = bytes[0] & PH_ROUTE_MASK;
+  s_is_flood = (route == ROUTE_TYPE_FLOOD || route == ROUTE_TYPE_TRANSPORT_FLOOD);
+
+  s_flood_broadcast_done = false;
+  s_active_peer_idx = (s_known_peer_count == 0 || zero_hop_advert) ? PEER_IDX_BROADCAST : 0;
+  issueSendAttempt();
+  if (is_send_complete) {
+    // issueSendAttempt() hit a hard esp_now_send() failure and gave up
+    // immediately -- report failure the same way the old code path did.
+    ESPNOW_DEBUG_PRINTLN("Send failed");
+    return false;
   }
-  last_send_result = result;
-  is_send_complete = true;
-  ESPNOW_DEBUG_PRINTLN("Send failed: %d", result);
-  return false;
+  n_sent++;
+  ESPNOW_DEBUG_PRINTLN("Send started (%s)", (s_active_peer_idx == PEER_IDX_BROADCAST) ? "broadcast" : "unicast");
+  return true;
 }
 
 bool ESPNowBridgeRadio::isSendComplete() {
@@ -510,46 +561,111 @@ uint32_t ESPNowBridgeRadio::getEstAirtimeFor(int len_bytes) {
   // a debugging session that claimed up to 13-SECOND completions -- that
   // claim was never reconciled with same-day live measurements showing
   // 8-43ms, and turned out to be unfounded once actually checked (see
-  // MAX_TX_ATTEMPTS's comment above). 290 (-> 435ms expiry) is sized for
-  // MAX_TX_ATTEMPTS=12's real worst case (~362ms, live-measured math above),
-  // with margin -- covers every retry attempt actually completing before
-  // Dispatcher gives up, at the cost of a genuinely stuck send taking longer
-  // to time out.
-  return 290;
+  // MAX_TX_ATTEMPTS's comment above). 290 (-> 435ms expiry) was sized for
+  // MAX_TX_ATTEMPTS=12's real single-peer worst case (~362ms, live-measured
+  // math above), with margin.
+  //
+  // Now that a send can fan out to every known peer in turn (see
+  // s_known_peers above), that per-peer worst case has to be multiplied by
+  // how many peers a single logical send might actually visit -- otherwise
+  // Dispatcher gives up and logs a failure while the fan-out is still
+  // legitimately working through peers 2, 3, 4... A FLOOD packet visits
+  // every known peer plus one extra broadcast pass; a DIRECT packet visits
+  // every known peer (no extra pass) -- so "known peers + 1" covers both,
+  // without needing to know here which kind of packet is in flight.
+  return 290 * ((uint32_t)s_known_peer_count + 1);
+}
+
+// Issues one esp_now_send() for whichever peer s_active_peer_idx currently
+// points at (a real known-peer slot, or the PEER_IDX_BROADCAST sentinel),
+// resetting the per-peer retry-attempt counter. Shared by startSendRaw()
+// (first peer of a new packet) and advanceOrFinish() (moving on to the next
+// one). On a hard failure to even hand off to the driver, marks complete
+// immediately -- same fallback OnDataSent() itself never gets a chance to
+// fire for.
+static void issueSendAttempt() {
+  s_tx_attempt = 1;
+  s_attempt_started_at = millis();
+  const uint8_t* dest = (s_active_peer_idx == PEER_IDX_BROADCAST)
+                       ? broadcastAddress : s_known_peers[s_active_peer_idx];
+  esp_err_t result = esp_now_send(dest, s_last_tx_buffer, s_last_tx_len);
+  if (result != ESP_OK) {
+    ESPNOW_DEBUG_PRINTLN("esp_now_send() call failed, err=%d", (int)result);
+    is_send_complete = true;
+  }
+}
+
+// Called once the current peer's send has either succeeded or exhausted its
+// retries (see OnDataSent()'s s_advance_pending). Mirrors
+// ESPNowBridge::advanceToNextPeerOrFinish()'s fan-out shape: unicast to every
+// known peer in turn, then (FLOOD/zero-hop-advert only) one extra broadcast
+// pass to reach anyone not yet individually learned, then done.
+static void advanceOrFinish() {
+  bool wasBroadcast = (s_active_peer_idx == PEER_IDX_BROADCAST);
+  uint8_t nextPeerIdx = wasBroadcast ? 0 : (uint8_t)(s_active_peer_idx + 1);
+
+  if (!wasBroadcast && s_known_peer_count > 0 && nextPeerIdx < s_known_peer_count) {
+    s_active_peer_idx = nextPeerIdx;
+    issueSendAttempt();
+    return;
+  }
+
+  // Unicast fan-out to every known peer is done (or there were none). FLOOD
+  // traffic still needs to reach whoever hasn't been individually learned
+  // yet -- a purely passive listener would otherwise never be reachable once
+  // ANY other peer becomes known. DIRECT traffic skips this: unicast to
+  // every known peer, or the sole bootstrap broadcast if none are known yet,
+  // is already correct for it.
+  if (!wasBroadcast && !s_flood_broadcast_done && s_known_peer_count > 0 && s_is_flood) {
+    s_flood_broadcast_done = true;
+    s_active_peer_idx = PEER_IDX_BROADCAST;
+    issueSendAttempt();
+    return;
+  }
+
+  is_send_complete = true;
 }
 
 void ESPNowBridgeRadio::loop() {
   if (s_pending_learn) {
     s_pending_learn = false;
-    if (s_peer_known) esp_now_del_peer(s_peer_mac);  // stale peer (e.g. a different repeater took over)
-    memcpy(s_peer_mac, s_pending_learn_mac, 6);
-    esp_now_peer_info_t unicastPeer = {};
-    memcpy(unicastPeer.peer_addr, s_peer_mac, 6);
-    unicastPeer.channel = s_channel;
-    unicastPeer.encrypt = false;
-    if (esp_now_add_peer(&unicastPeer) == ESP_OK) {
-      s_peer_known = true;
-      ESPNOW_DEBUG_PRINTLN("Learned peer, switching to unicast");
-    } else {
-      ESPNOW_DEBUG_PRINTLN("Failed to register peer for unicast, staying on broadcast");
-      s_peer_known = false;
+    if (s_known_peer_count < MAX_KNOWN_PEERS && !isKnownPeer(s_pending_learn_mac)) {
+      esp_now_peer_info_t unicastPeer = {};
+      memcpy(unicastPeer.peer_addr, s_pending_learn_mac, 6);
+      unicastPeer.channel = s_channel;
+      unicastPeer.encrypt = false;
+      if (esp_now_add_peer(&unicastPeer) == ESP_OK) {
+        memcpy(s_known_peers[s_known_peer_count], s_pending_learn_mac, 6);
+        s_known_peer_count++;
+        ESPNOW_DEBUG_PRINTLN("Learned peer, now tracking %d for unicast", (int)s_known_peer_count);
+      } else {
+        ESPNOW_DEBUG_PRINTLN("Failed to register peer for unicast, staying on broadcast for it");
+      }
     }
+    // else: already known, or table full -- that peer just stays reachable
+    // only via the FLOOD broadcast pass, same as ESPNowBridge's "table full"
+    // case.
   }
 
   if (s_retry_pending && (int32_t)(millis() - s_retry_at) >= 0) {
     s_retry_pending = false;
     s_tx_attempt++;
     s_attempt_started_at = millis();
-    const uint8_t* dest = s_peer_known ? s_peer_mac : broadcastAddress;
+    const uint8_t* dest = (s_active_peer_idx == PEER_IDX_BROADCAST)
+                         ? broadcastAddress : s_known_peers[s_active_peer_idx];
     esp_err_t result = esp_now_send(dest, s_last_tx_buffer, s_last_tx_len);
     if (result != ESP_OK) {
-      // Couldn't even hand off the retry -- give up, mark complete (as a
-      // failure Dispatcher will see via logTxFail() once outbound_expiry
-      // passes, same as any other send failure).
+      // Couldn't even hand off the retry -- give up on this peer and move on,
+      // same as exhausting MAX_TX_ATTEMPTS (see advanceOrFinish()).
       ESPNOW_DEBUG_PRINTLN("Retry send failed: %d", (int)result);
-      is_send_complete = true;
+      s_advance_pending = true;
     }
     // else: wait for OnDataSent() again for this attempt.
+  }
+
+  if (s_advance_pending) {
+    s_advance_pending = false;
+    advanceOrFinish();
   }
 
   if (_tx_led_on && (int32_t)(millis() - _tx_led_off_at) >= 0) {
