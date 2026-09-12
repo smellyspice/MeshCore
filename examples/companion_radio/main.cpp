@@ -53,6 +53,15 @@ MultiSerialInterface interface_manager;
   #endif
 #endif
 
+// WiFi STA for IpBridgeRadio's own mesh link (see the setup()/loop() blocks
+// below) -- needed even when WIFI_SSID (the phone-transport path above) is
+// NOT defined, e.g. a BLE/USB companion that still reaches its repeater over
+// IP instead of ESP-NOW.
+#if defined(ESP32) && defined(IP_BRIDGE_RADIO) && !defined(WIFI_SSID)
+  #include <WiFi.h>
+  #include <esp_wifi.h>
+#endif
+
 // include usb interface
 #if defined(ENABLE_USB_INTERFACE)
   #include <helpers/ArduinoSerialInterface.h>
@@ -116,7 +125,7 @@ void halt() {
 }
 
 /* WIFI RECONNECT TRACKERS */
-#if defined(ESP32) && defined(WIFI_SSID)
+#if defined(ESP32) && (defined(WIFI_SSID) || defined(IP_BRIDGE_RADIO))
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
 #endif
@@ -203,6 +212,18 @@ void setup() {
 
 // add wifi interface
 #ifdef WIFI_SSID
+  #if !defined(IP_BRIDGE_RADIO)
+  // Standalone WIFI_SSID path (e.g. ESPNOW_BRIDGE_RADIO's own _wifi env) --
+  // real compile-time credentials, so this is the only WiFi.begin() call at
+  // all. Skipped entirely when IP_BRIDGE_RADIO is also defined: that combo
+  // env uses WIFI_SSID purely to compile in SerialWifiInterface below, with
+  // the actual (single) WiFi.begin() call issued later using real runtime
+  // credentials -- calling WiFi.begin() here too, with throwaway placeholder
+  // creds, would tear down and recreate the STA netif a second time once the
+  // real call happens, which orphans the WiFiServer socket wifi_interface.begin()
+  // below already bound (confirmed live 2026-09-12: WiFi itself connected fine,
+  // but nothing ever answered on the phone-pairing TCP port again after the
+  // second WiFi.begin()).
   board.setInhibitSleep(true);   // prevent sleep when WiFi is active
   WiFi.setAutoReconnect(true);
   esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
@@ -221,6 +242,71 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PWD);
   wifi_interface.begin(TCP_PORT);
   interface_manager.addInterface(InterfaceType::WiFi, &wifi_interface);
+  #endif
+  // IP_BRIDGE_RADIO combo case: wifi_interface.begin() is deferred to the
+  // first ARDUINO_EVENT_WIFI_STA_GOT_IP in the block below instead of being
+  // called here immediately -- confirmed live (2026-09-12) that starting the
+  // WiFiServer before the STA interface has ever actually associated leaves
+  // it refusing every connection permanently (TCP RST, not just slow to
+  // answer), even though the *later* real WiFi.begin() goes on to succeed.
+#endif
+
+// bring up WiFi STA for IpBridgeRadio's own mesh link -- independent of
+// whatever transport talks to the phone app (USB/BLE/WiFi above). Runtime
+// config only (wifi.ssid/wifi.pwd set via CMD_SET_WIFI_PARAMS), same
+// convention simple_repeater's own WITH_IP_BRIDGE WiFi STA bring-up uses --
+// never a compile-time default.
+#if defined(ESP32) && defined(IP_BRIDGE_RADIO)
+  if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0) {
+    board.setInhibitSleep(true);   // prevent sleep when WiFi is active
+    WiFi.setAutoReconnect(true);
+    esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter, same reasoning as WIFI_SSID path
+    #ifndef WIFI_TX_POWER
+    #define WIFI_TX_POWER 20
+    #endif
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
+    int8_t actual_power = 0;
+    esp_wifi_get_max_tx_power(&actual_power);
+    MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: tx_power set to %d (readback: %d quarter-dBm)", WIFI_TX_POWER, (int)actual_power);
+
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+            MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: disconnected, reason=%d", (int)info.wifi_sta_disconnected.reason);
+            wifi_needs_reconnect = true;
+        } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+            MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: got IP: %s", WiFi.localIP().toString().c_str());
+            wifi_needs_reconnect = false;
+            #ifdef WIFI_SSID
+            // First real IP -- safe now to start the phone-pairing WiFiServer
+            // (see the comment on the skipped immediate wifi_interface.begin()
+            // above for why this can't happen any earlier). Guarded to once:
+            // GOT_IP can fire again on a later reconnect.
+            static bool wifi_interface_started = false;
+            if (!wifi_interface_started) {
+              wifi_interface_started = true;
+              wifi_interface.begin(TCP_PORT);
+              interface_manager.addInterface(InterfaceType::WiFi, &wifi_interface);
+              // addInterface() here happens well after MyMesh::startInterface()'s
+              // one-time interface_manager.enable() sweep in setup() already ran
+              // (this whole block only runs once WiFi has an IP, i.e. mid-loop()),
+              // so this interface's own _isEnabled flag was never set by that sweep --
+              // MultiSerialInterface::checkRecvFrame()/writeFrame() silently skip any
+              // interface where isEnabled() is false, which is why the phone app could
+              // open the TCP socket (plain WiFiServer::accept(), unrelated to this flag)
+              // but never got a device-info response. Enable it explicitly.
+              wifi_interface.enable();
+            }
+            #endif
+        } else if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+            MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: associated to AP");
+        } else if (event == ARDUINO_EVENT_WIFI_STA_START) {
+            MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: STA start");
+        }
+    });
+
+    MESH_DEBUG_PRINTLN("IpBridgeRadio WiFi: begin(ssid=%s)", the_mesh.getNodePrefs()->wifi_ssid);
+    WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
+  }
 #endif
 
 // add usb interface
@@ -275,10 +361,13 @@ void loop() {
 #endif
   }
 
-#if defined(ESP32) && defined(WIFI_SSID)
-  // Safely attempt to reconnect every 10 seconds if flagged
+#if defined(ESP32) && (defined(WIFI_SSID) || defined(IP_BRIDGE_RADIO))
+  // Safely attempt to reconnect every 10 seconds if flagged. MESH_DEBUG_PRINTLN
+  // (not WIFI_DEBUG_PRINTLN) -- the latter is only ever defined when WIFI_SSID
+  // pulls in SerialWifiInterface.h, which an IP_BRIDGE_RADIO-only build (BLE/
+  // USB for the phone, WiFi only for the mesh link) never does.
   if (wifi_needs_reconnect && (millis() - last_wifi_reconnect_attempt > 10000)) {
-    WIFI_DEBUG_PRINTLN("Attempting manual WiFi reconnect...");
+    MESH_DEBUG_PRINTLN("Attempting manual WiFi reconnect...");
     WiFi.disconnect();
     WiFi.reconnect();
     last_wifi_reconnect_attempt = millis();

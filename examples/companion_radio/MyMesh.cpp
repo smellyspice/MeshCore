@@ -66,6 +66,15 @@
 #define CMD_SET_BRIDGE_PARAMS         66
 #define CMD_GET_BRIDGE_PARAMS         67
 #endif
+#ifdef IP_BRIDGE_RADIO
+// Two separate commands, not one bundled set -- wifi_ssid+wifi_pwd+ip_host+
+// ip_port+ip_secret together (195 bytes) would exceed MAX_FRAME_SIZE (176).
+#define CMD_SET_WIFI_PARAMS           68
+#define CMD_GET_WIFI_PARAMS           69
+#define CMD_SET_IP_PARAMS             70
+#define CMD_GET_IP_PARAMS             71
+#define CMD_GET_IP_STATUS             72
+#endif
 
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
@@ -103,6 +112,11 @@
 #define RESP_CODE_DEFAULT_FLOOD_SCOPE 28
 #ifdef ESPNOW_BRIDGE_RADIO
 #define RESP_CODE_BRIDGE_PARAMS       29
+#endif
+#ifdef IP_BRIDGE_RADIO
+#define RESP_CODE_WIFI_PARAMS         30
+#define RESP_CODE_IP_PARAMS           31
+#define RESP_CODE_IP_STATUS           32
 #endif
 
 #define MAX_CHANNEL_DATA_LENGTH       (MAX_FRAME_SIZE - 9)
@@ -996,6 +1010,15 @@ void MyMesh::begin(bool has_display) {
   // silently combining a real value with a placeholder for the other.
   if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
     radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+  }
+#endif
+#ifdef IP_BRIDGE_RADIO
+  // Same reasoning as ESPNOW_BRIDGE_RADIO above -- radio_driver.init() (called
+  // before prefs were loaded) left this inert. Only start it here once
+  // host/port/secret are all actually set; WiFi STA itself is brought up
+  // separately in main.cpp once wifi_ssid is set.
+  if (_prefs.ip_host[0] != 0 && _prefs.ip_port != 0 && _prefs.ip_secret[0] != 0) {
+    radio_driver.setIpParams(_prefs.ip_host, _prefs.ip_port, _prefs.ip_secret, self_id.pub_key);
   }
 #endif
 }
@@ -2005,6 +2028,48 @@ void MyMesh::handleCmdFrame(size_t len) {
     out_frame[1] = _prefs.bridge_channel;
     memcpy(&out_frame[2], _prefs.bridge_secret, sizeof(_prefs.bridge_secret));
     _serial->writeFrame(out_frame, 2 + sizeof(_prefs.bridge_secret));
+#endif
+#ifdef IP_BRIDGE_RADIO
+  } else if (cmd_frame[0] == CMD_SET_WIFI_PARAMS &&
+             len >= 1 + (int)sizeof(_prefs.wifi_ssid) + (int)sizeof(_prefs.wifi_pwd)) {
+    StrHelper::strncpy(_prefs.wifi_ssid, (char *) &cmd_frame[1], sizeof(_prefs.wifi_ssid));
+    StrHelper::strncpy(_prefs.wifi_pwd, (char *) &cmd_frame[1 + sizeof(_prefs.wifi_ssid)], sizeof(_prefs.wifi_pwd));
+    savePrefs();
+    writeOKFrame();
+    // Reboot needed to actually bring up WiFi STA with the new credentials
+    // (main.cpp only attempts this once, at boot) -- same "applied on next
+    // boot" contract CMD_SET_DEVICE_PIN etc. already use elsewhere in this
+    // file, unlike CMD_SET_BRIDGE_PARAMS/CMD_SET_IP_PARAMS below which apply
+    // immediately.
+  } else if (cmd_frame[0] == CMD_GET_WIFI_PARAMS) {
+    out_frame[0] = RESP_CODE_WIFI_PARAMS;
+    memcpy(&out_frame[1], _prefs.wifi_ssid, sizeof(_prefs.wifi_ssid));
+    memcpy(&out_frame[1 + sizeof(_prefs.wifi_ssid)], _prefs.wifi_pwd, sizeof(_prefs.wifi_pwd));
+    _serial->writeFrame(out_frame, 1 + sizeof(_prefs.wifi_ssid) + sizeof(_prefs.wifi_pwd));
+  } else if (cmd_frame[0] == CMD_SET_IP_PARAMS &&
+             len >= 1 + (int)sizeof(_prefs.ip_host) + 2 + (int)sizeof(_prefs.ip_secret)) {
+    StrHelper::strncpy(_prefs.ip_host, (char *) &cmd_frame[1], sizeof(_prefs.ip_host));
+    uint16_t port;
+    memcpy(&port, &cmd_frame[1 + sizeof(_prefs.ip_host)], 2);
+    _prefs.ip_port = port;
+    StrHelper::strncpy(_prefs.ip_secret, (char *) &cmd_frame[1 + sizeof(_prefs.ip_host) + 2], sizeof(_prefs.ip_secret));
+    savePrefs();
+    // Applied immediately -- no reboot needed, same convention
+    // CMD_SET_BRIDGE_PARAMS uses.
+    radio_driver.setIpParams(_prefs.ip_host, _prefs.ip_port, _prefs.ip_secret, self_id.pub_key);
+    writeOKFrame();
+  } else if (cmd_frame[0] == CMD_GET_IP_PARAMS) {
+    // No compile-time fallback -- report the raw persisted values (0 / empty
+    // means "not configured yet"), same convention CMD_GET_BRIDGE_PARAMS uses.
+    out_frame[0] = RESP_CODE_IP_PARAMS;
+    memcpy(&out_frame[1], _prefs.ip_host, sizeof(_prefs.ip_host));
+    memcpy(&out_frame[1 + sizeof(_prefs.ip_host)], &_prefs.ip_port, 2);
+    memcpy(&out_frame[1 + sizeof(_prefs.ip_host) + 2], _prefs.ip_secret, sizeof(_prefs.ip_secret));
+    _serial->writeFrame(out_frame, 1 + sizeof(_prefs.ip_host) + 2 + sizeof(_prefs.ip_secret));
+  } else if (cmd_frame[0] == CMD_GET_IP_STATUS) {
+    out_frame[0] = RESP_CODE_IP_STATUS;
+    radio_driver.formatStatus((char *) &out_frame[1]);
+    _serial->writeFrame(out_frame, 1 + strlen((char *) &out_frame[1]));
 #endif
   } else if (cmd_frame[0] == CMD_SEND_CONTROL_DATA && len >= 2 && (cmd_frame[1] & 0x80) != 0) {
     auto resp = createControlData(&cmd_frame[1], len - 1);

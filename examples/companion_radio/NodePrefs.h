@@ -44,6 +44,17 @@ public:
   uint8_t bridge_channel = 0;   // 0 = not configured yet -- radio stays inert, no compile-time default
   char bridge_secret[16];       // empty = not configured yet -- radio stays inert, no compile-time default
 #endif
+#ifdef IP_BRIDGE_RADIO
+  // WiFi STA (to reach the mesh -- independent of whatever transport talks
+  // to the phone app) + IpBridgeRadio's own host/port/secret. None have a
+  // compile-time default -- radio stays inert until all three of
+  // host/port/secret are set. See CMD_SET_IP_PARAMS in MyMesh.cpp.
+  char wifi_ssid[33];
+  char wifi_pwd[64];
+  char ip_host[64];
+  uint16_t ip_port = 0;
+  char ip_secret[32];
+#endif
 
 private:
   class RadioPrefs : public ConfigSerializer {  // COPIED from CommonCLI (for now)
@@ -140,6 +151,13 @@ protected:
     def("br_ch", bridge_channel);
     def("br_sec", bridge_secret, sizeof(bridge_secret));
 #endif
+#ifdef IP_BRIDGE_RADIO
+    def("wifi_ssid", wifi_ssid, sizeof(wifi_ssid));
+    def("wifi_pwd", wifi_pwd, sizeof(wifi_pwd));
+    def("ip_host", ip_host, sizeof(ip_host));
+    def("ip_port", ip_port);
+    def("ip_secret", ip_secret, sizeof(ip_secret));
+#endif
   }
 public:
   NodePrefs() : radio(this), gps(this), companion(this) {
@@ -148,6 +166,12 @@ public:
     memset(default_scope_key, 0, sizeof(default_scope_key));
 #ifdef ESPNOW_BRIDGE_RADIO
     bridge_secret[0] = 0;
+#endif
+#ifdef IP_BRIDGE_RADIO
+    wifi_ssid[0] = 0;
+    wifi_pwd[0] = 0;
+    ip_host[0] = 0;
+    ip_secret[0] = 0;
 #endif
   }
   // new accessor methods
