@@ -275,6 +275,20 @@ public:
     }
   }
 #endif
+#ifdef IP_BRIDGE_RADIO
+  // Applied immediately -- no reboot needed, same convention
+  // ESPNOW_BRIDGE_RADIO's restartBridge() and companion_radio's
+  // CMD_SET_IP_PARAMS handler both use.
+  void restartBridge() override {
+    if (_prefs.ip_host[0] != 0 && _prefs.ip_port != 0 && _prefs.ip_secret[0] != 0) {
+      radio_driver.setIpParams(_prefs.ip_host, _prefs.ip_port, _prefs.ip_secret, self_id.pub_key);
+    }
+  }
+  bool formatIpStatus(char *reply) override {
+    radio_driver.formatStatus(reply);
+    return true;
+  }
+#endif
 
   void formatNeighborsReply(char *reply) override {
     strcpy(reply, "not supported");

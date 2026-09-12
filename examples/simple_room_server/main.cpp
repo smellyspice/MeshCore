@@ -3,6 +3,18 @@
 
 #include "MyMesh.h"
 
+// WiFi STA for IpBridgeRadio's own mesh link -- runtime config only
+// (wifi.ssid/wifi.pwd set via the CLI), same convention companion_radio's
+// main.cpp uses for the same radio. No phone-pairing transport to juggle
+// here (room server only ever speaks its text CLI over serial/Ethernet),
+// so this is simpler than the companion's version of the same bring-up.
+#if defined(ESP32) && defined(IP_BRIDGE_RADIO)
+  #include <WiFi.h>
+  #include <esp_wifi.h>
+  bool wifi_needs_reconnect = false;
+  unsigned long last_wifi_reconnect_attempt = 0;
+#endif
+
 #ifdef ETHERNET_ENABLED
   #define ETHERNET_CLI_BANNER "MeshCore Room Server CLI"
   #include <helpers/nrf52/EthernetCLI.h>
@@ -87,6 +99,28 @@ void setup() {
 
   the_mesh.begin(fs);
 
+#if defined(ESP32) && defined(IP_BRIDGE_RADIO)
+  if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0) {
+    board.setInhibitSleep(true);   // prevent sleep when WiFi is active
+    WiFi.setAutoReconnect(true);
+    esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter, same reasoning as companion_radio's own WiFi paths
+    #ifndef WIFI_TX_POWER
+    #define WIFI_TX_POWER 20
+    #endif
+    esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
+
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
+        if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+            wifi_needs_reconnect = true;
+        } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+            wifi_needs_reconnect = false;
+        }
+    });
+
+    WiFi.begin(the_mesh.getNodePrefs()->wifi_ssid, the_mesh.getNodePrefs()->wifi_pwd);
+  }
+#endif
+
 #ifdef DISPLAY_CLASS
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif
@@ -149,6 +183,14 @@ void loop() {
     }
     ethernet_send_reply(reply);
     ethernet_command[0] = 0;
+  }
+#endif
+
+#if defined(ESP32) && defined(IP_BRIDGE_RADIO)
+  if (wifi_needs_reconnect && (millis() - last_wifi_reconnect_attempt > 10000)) {
+    WiFi.disconnect();
+    WiFi.reconnect();
+    last_wifi_reconnect_attempt = millis();
   }
 #endif
 

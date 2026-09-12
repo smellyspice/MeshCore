@@ -922,6 +922,17 @@ void MyMesh::begin(FILESYSTEM *fs) {
   }
 #endif
 
+#ifdef IP_BRIDGE_RADIO
+  // Same reasoning as ESPNOW_BRIDGE_RADIO above -- radio_driver.init() (called
+  // before prefs were loaded) left this inert. Only start it here once
+  // host/port/secret are all actually set; WiFi STA itself is brought up
+  // separately in main.cpp once wifi_ssid is set. Mirrors
+  // companion_radio/MyMesh.cpp's begin().
+  if (_prefs.ip_host[0] != 0 && _prefs.ip_port != 0 && _prefs.ip_secret[0] != 0) {
+    radio_driver.setIpParams(_prefs.ip_host, _prefs.ip_port, _prefs.ip_secret, self_id.pub_key);
+  }
+#endif
+
 #ifdef WITH_ROOM_CHANNEL_BRIDGE
   loadRoomChannel();
 #endif
