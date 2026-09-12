@@ -869,6 +869,27 @@ bool MyMesh::tryRelayViaBridge(mesh::Packet* packet) {
       return true;
     }
   }
+
+  // Terminal-hop case: path is exhausted (this repeater was the last named
+  // relay), so the real destination never appears in path[] at all -- only
+  // in the payload's dest_hash. Previously always fell through to local TX
+  // on the assumption that an exhausted path means the destination must be
+  // RF-reachable; that assumption doesn't hold for a companion with no LoRa
+  // radio at all (e.g. an IP-bridge-only or ESPNOW-bridge-only companion --
+  // found live via a CoreScope trace, 2026-09-12, hash e1c1c7d7658be9e8:
+  // EchoBoard -> EchoGate -> R42, R42 the last named hop, then needlessly
+  // keying real LoRa to deliver to a WiFi/IP-only companion). Same lookup
+  // as above, just against dest_hash instead of the next path hop.
+  if (packet->isRouteDirect() && packet->getPathHashCount() == 0 && packet->payload_len > 0) {
+    void* target_bridge = findBridgeOnlyNextHop(packet->payload, 1);
+    if (target_bridge != NULL) {
+      BRIDGE_DEBUG_PRINTLN("tryRelayViaBridge: DIRECT-route relay, path exhausted, destination is a known bridge-only neighbour (type=%d), redirecting\n",
+                           (int)packet->getPayloadType());
+      ((AbstractBridge *)target_bridge)->sendPacket(packet);
+      releasePacket(packet);
+      return true;
+    }
+  }
   return false;
 }
 #endif

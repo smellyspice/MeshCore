@@ -249,6 +249,22 @@ protected:
         return true;
       }
     }
+
+    // Terminal-hop case: path is exhausted (this repeater was the last named
+    // relay), so the real destination never appears in path[] at all -- only
+    // in the payload's dest_hash. Previously always fell through to local TX
+    // on the assumption that an exhausted path means the destination must be
+    // RF-reachable; that assumption doesn't hold for a companion with no
+    // LoRa radio at all (found live, CoreScope hash e1c1c7d7658be9e8). Same
+    // lookup as above, just against dest_hash instead of the next path hop.
+    if (packet->isRouteDirect() && packet->getPathHashCount() == 0 && packet->payload_len > 0) {
+      void* target_bridge = findBridgeOnlyNextHop(packet->payload, 1);
+      if (target_bridge != nullptr) {
+        ((AbstractBridge*)target_bridge)->sendPacket(packet);
+        releasePacket(packet);
+        return true;
+      }
+    }
     return false;
   }
 
@@ -347,6 +363,28 @@ Packet* makeDirectRelayPacket(uint8_t payload_type, uint8_t self_hash, uint8_t n
   uint8_t body[4] = {1, 1, 1, 1};
   memcpy(p->payload, body, sizeof(body));
   p->payload_len = sizeof(body);
+  return p;
+}
+
+// A DIRECT packet whose path names ONLY this repeater -- the last named
+// relay hop, with the real final destination never appearing in path[] at
+// all (it only shows up as the payload's dest_hash byte). Matches the live
+// capture that found this gap (CoreScope hash e1c1c7d7658be9e8, 2026-09-12):
+// EchoBoard -> EchoGate -> R42, path=[R42] on arrival at R42. R42 pops its
+// own hash off (removeSelfFromPath()), path[] goes empty -- and, before this
+// fix, that was indistinguishable from "the real destination must be
+// RF-reachable, just broadcast" even when dest_hash names a companion with
+// no LoRa radio at all (an IP-bridge-only or ESPNOW-bridge-only companion).
+Packet* makeDirectTerminalPacket(uint8_t payload_type, uint8_t self_hash, uint8_t dest_hash) {
+  Packet* p = new Packet();
+  p->header = ROUTE_TYPE_DIRECT | (payload_type << PH_TYPE_SHIFT);
+  p->path[0] = self_hash;
+  p->setPathHashSizeAndCount(1, 1);
+  p->payload[0] = dest_hash;   // dest_hash: first payload byte for PATH/REQ/RESPONSE/TXT_MSG
+  p->payload[1] = 0x11;        // src_hash, arbitrary
+  uint8_t mac_and_data[4] = {1, 1, 1, 1};
+  memcpy(&p->payload[2], mac_and_data, sizeof(mac_and_data));
+  p->payload_len = 2 + sizeof(mac_and_data);
   return p;
 }
 
@@ -736,6 +774,78 @@ TEST(DualBridgeAckMirror, FloodPacketNeverRedirectsViaRelayHook) {
 
   EXPECT_FALSE(repeater.tryRelay(&flood))
       << "FLOOD-route packets must never be redirected by the relay hook";
+}
+
+// The terminal-hop gap this fix closes: this repeater is the LAST named hop
+// (path exhausted after removeSelfFromPath()), and the real destination --
+// visible only via the payload's dest_hash, never in path[] -- is a known
+// bridge-only neighbour (an IP-bridge companion with no LoRa radio at all,
+// e.g. FEED). Must redirect there instead of broadcasting over local RF for
+// an endpoint that can never hear it.
+TEST(DualBridgeAckMirror, TerminalPathExhaustedToKnownBridgeOnlyDestinationRedirectsViaIp) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0xFE, &repeater.ip_bridge);   // dest known bridge-only via IP, never RF
+
+  repeater.relayRecv(makeDirectTerminalPacket(PAYLOAD_TYPE_TXT_MSG, 0x73, 0xFE));
+
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1)
+      << "path exhausted at this repeater -- the real destination (dest_hash) "
+         "is a known bridge-only neighbour and must redirect there instead of "
+         "broadcasting over local RF";
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 0);
+  EXPECT_EQ(repeater.mgr.pending, nullptr)
+      << "a redirected terminal-hop packet must NOT also be queued for local "
+         "TX -- this is the RF leak this fix closes (CoreScope hash "
+         "e1c1c7d7658be9e8, 2026-09-12)";
+}
+
+// Same fix, same lookup, applies identically to an ESP-NOW-attached
+// bridge-only companion -- not IP-bridge-specific. findBridgeOnlyNextHop()
+// is already bridge-type-agnostic; this just proves the terminal-hop branch
+// inherits that.
+TEST(DualBridgeAckMirror, TerminalPathExhaustedToKnownBridgeOnlyDestinationRedirectsViaEspNow) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putBridgeNeighbourHash(0x99, &repeater.espnow_bridge);
+
+  repeater.relayRecv(makeDirectTerminalPacket(PAYLOAD_TYPE_TXT_MSG, 0x73, 0x99));
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "an ESP-NOW-attached bridge-only companion must redirect the same way";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 0);
+  EXPECT_EQ(repeater.mgr.pending, nullptr);
+}
+
+// Regression guard: an unknown destination must fall through to today's
+// existing, already-tested behavior -- queued for local TX (and, once
+// actually sent, mirrored to every bridge via logTx(), same as before this
+// fix existed).
+TEST(DualBridgeAckMirror, TerminalPathExhaustedToUnknownDestinationFallsThroughAndMirrors) {
+  TestTrifectaMesh repeater(0x73);
+  // no neighbour tables populated -- destination identity is unknown
+
+  repeater.relayRecv(makeDirectTerminalPacket(PAYLOAD_TYPE_TXT_MSG, 0x73, 0xFE));
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "unknown destination must fall through to real local TX + logTx's mirror";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1);
+}
+
+// Safety guard: if the destination has EVER been heard over real RF (even if
+// it also happens to have a bridge_neighbours entry), local delivery must
+// not be skipped -- same principle as the mid-relay fix, re-verified for
+// this separate terminal-hop branch since it has its own independent gate.
+TEST(DualBridgeAckMirror, TerminalPathExhaustedToRfHeardDestinationFallsThroughAndMirrors) {
+  TestTrifectaMesh repeater(0x73);
+  repeater.putRfNeighbourHash(0xFE);
+  repeater.putBridgeNeighbourHash(0xFE, &repeater.ip_bridge);   // also bridge-heard -- RF must still win
+
+  repeater.relayRecv(makeDirectTerminalPacket(PAYLOAD_TYPE_TXT_MSG, 0x73, 0xFE));
+  repeater.pumpSendCycle();
+
+  EXPECT_EQ(repeater.espnow_bridge.send_calls, 1)
+      << "an RF-heard destination must never be skipped in favor of a bridge redirect";
+  EXPECT_EQ(repeater.ip_bridge.send_calls, 1);
 }
 
 int main(int argc, char** argv) {
