@@ -154,10 +154,10 @@
     <p class="pitch">
       A companion, room server, or repeater-role board — none of them with
       a LoRa radio of their own — that tethers to a Trifecta repeater over
-      ESP&#8209;NOW instead of a second LoRa hop. It can't work on its own —
-      it always needs a paired repeater running the bridge — but that's the
-      point: you already decided where that repeater goes, this is how
-      everything else reaches it.
+      ESP&#8209;NOW or a direct encrypted IP link instead of a second LoRa
+      hop. It can't work on its own — it always needs a paired repeater
+      running the bridge — but that's the point: you already decided where
+      that repeater goes, this is how everything else reaches it.
     </p>
     <div class="chips">
       <span class="chip">Requires a Trifecta repeater</span>
@@ -167,7 +167,7 @@
   </header>
 
   <div class="section-head"><div class="diamond"></div><h2>Where this actually helps</h2></div>
-  <p>Two real setups this covers:</p>
+  <p>Three real setups this covers:</p>
 
   <div class="usecase-grid">
     <div class="usecase">
@@ -185,6 +185,16 @@
         basement doesn't need a real RF hop just to reach it ten feet
         through a floor — that's airtime spent for no reason. WiFi already
         reaches; let it.
+      </p>
+    </div>
+    <div class="usecase">
+      <h3>Not even in ESP&#8209;NOW range</h3>
+      <p>
+        A companion or room server that isn't anywhere near its repeater's
+        WiFi — a different building, a different network entirely — can
+        skip ESP&#8209;NOW and connect straight over IP instead, the same
+        TLS&#8209;PSK link a repeater-to-repeater IP bridge uses. Anywhere
+        that board's WiFi reaches the repeater's address is enough.
       </p>
     </div>
   </div>

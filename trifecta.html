@@ -195,9 +195,9 @@
       <p>Lets a Sidecar (companion, room server, or another repeater) attach over 2.4GHz WiFi hardware — short range, no internet path at all.</p>
     </div>
     <div class="leg">
-      <div class="leg-tag">Point-to-point</div>
+      <div class="leg-tag">Point-to-point, per peer</div>
       <h3>IP bridge</h3>
-      <p>Links to exactly one configured peer repeater over TCP+TLS-PSK — not a public broker anyone can join, just two repeaters that already agreed to connect.</p>
+      <p>Links to one or more explicitly configured peers over TCP+TLS-PSK, each with its own revocable credential — not a public broker anyone can join, just boards that already agreed to connect. A peer doesn't have to be another repeater, either — a companion with no LoRa radio at all can connect the same way, straight over IP with no ESP&#8209;NOW hop in between.</p>
     </div>
   </div>
 

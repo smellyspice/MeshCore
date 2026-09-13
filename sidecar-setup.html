@@ -135,7 +135,10 @@
     (<code>ESP32_S3_Zero_*</code> vs <code>ESP32_C3_SuperMini_*</code>):
     <code>*_comp_radio_bridge_espnow_dual</code> for a companion,
     <code>*_room_server_bridge_espnow</code> for a room server,
-    <code>*_repeater_bridge_espnow</code> for a repeater-role Sidecar.
+    <code>*_repeater_bridge_espnow</code> for a repeater-role Sidecar. The
+    direct-IP variants (<code>*_comp_radio_ip_*</code>,
+    <code>*_room_server_ip</code>) skip this step entirely — no
+    ESP&#8209;NOW join to configure, see their own sections below.
     Getting the environment onto your board isn't covered here — this page
     picks up once you're already running it.
   </p>
@@ -143,7 +146,7 @@
   <div class="section-head"><div class="num">2</div><h2>Configure each role</h2></div>
 
   <div class="role">
-    <h3>Companion</h3>
+    <h3>Companion (ESP&#8209;NOW)</h3>
     <p>No text CLI — companion firmware speaks the binary phone-app protocol on serial instead. Use the bundled script to join the ESP&#8209;NOW side before or after pairing with a phone app:</p>
     <pre class="cli"><span class="k">python3</span> set_bridge_params.py list
 <span class="k">python3</span> set_bridge_params.py &lt;port&gt; get
@@ -152,8 +155,56 @@
   </div>
 
   <div class="role">
-    <h3>Room server</h3>
+    <h3>Companion (direct IP, no ESP&#8209;NOW)</h3>
+    <p>
+      New: a Waveshare ESP32&#8209;S3&#8209;Zero companion build
+      (<code>ESP32_S3_Zero_comp_radio_ip_*</code> — usb/ble/dual/wifi
+      variants) that skips ESP&#8209;NOW entirely and talks straight to the
+      repeater's IP bridge over WiFi (TCP + TLS&#8209;PSK, the same link a
+      repeater&#8209;to&#8209;repeater IP bridge uses). No ESP&#8209;NOW
+      proximity to the repeater needed — just WiFi reaching its address.
+      Also no text CLI, same binary phone-app protocol on serial — use the
+      bundled script instead:
+    </p>
+    <pre class="cli"><span class="k">python3</span> set_ip_params.py list
+<span class="k">python3</span> set_ip_params.py &lt;port&gt; wifi set &lt;ssid&gt; &lt;password&gt;   <span class="c"># reboot needed after this one</span>
+<span class="k">python3</span> set_ip_params.py &lt;port&gt; ip set &lt;repeater host or IP&gt; &lt;port&gt; &lt;secret&gt;
+<span class="k">python3</span> set_ip_params.py &lt;port&gt; status</pre>
+    <p>
+      The secret must match a credential the repeater has registered for
+      this companion via <code>set ip.peer.add &lt;this device's
+      identity&gt; &lt;secret&gt;</code> — see <a href="trifecta-setup.html">Trifecta
+      setup</a>'s "Multiple IP peers" section. This device's identity (the
+      8&#8209;hex&#8209;char id the repeater side needs) is reported by
+      <code>set_ip_params.py &lt;port&gt; status</code> once connected, or by
+      the companion app's own device-info screen. Needs
+      <code>pip install pyserial</code>.
+    </p>
+  </div>
+
+  <div class="role">
+    <h3>Room server (ESP&#8209;NOW)</h3>
     <p>Real text CLI over USB. Same ESP&#8209;NOW join as above (<code>set bridge.channel</code>/<code>set bridge.secret</code>), then optionally add a channel mirror — see <a href="echo-board.html">Echo Board</a> for that piece specifically.</p>
+  </div>
+
+  <div class="role">
+    <h3>Room server (direct IP, no ESP&#8209;NOW)</h3>
+    <p>
+      New: same idea as the direct-IP companion above, for the room-server
+      role — <code>ESP32_S3_Zero_room_server_ip</code> and
+      <code>ESP32_C3_SuperMini_room_server_ip</code> talk straight to a
+      repeater's IP bridge over WiFi (TCP + TLS&#8209;PSK), no ESP&#8209;NOW
+      hop or gateway board required. Useful as a standalone sidecar
+      wherever WiFi reaches the repeater but ESP&#8209;NOW proximity
+      doesn't. Unlike the companion, this role keeps its normal text CLI —
+      configure it the same way as any other IP-bridge peer:
+    </p>
+    <pre class="cli"><span class="k">set</span> wifi.ssid &lt;name&gt;
+<span class="k">set</span> wifi.pwd &lt;password&gt;
+<span class="k">set</span> ip.host &lt;repeater host or IP&gt;
+<span class="k">set</span> ip.port &lt;port&gt;
+<span class="k">set</span> ip.secret &lt;key&gt;              <span class="c"># must match the repeater's ip.peer.add entry for this device</span></pre>
+    <p>Once connected, add a channel mirror the same way as the ESP&#8209;NOW room server above — see <a href="echo-board.html">Echo Board</a>.</p>
   </div>
 
   <div class="role">
