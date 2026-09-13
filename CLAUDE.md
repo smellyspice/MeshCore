@@ -76,3 +76,19 @@ To add a new firmware role or radio feature, the layering to understand is: `Dis
 - 2-space indent, `camelCase` functions/variables, `UpperCamelCase` classes, `ALL_CAPS` `#define` constants.
 - One feature/fix per PR. Larger changes need an issue + rough maintainer sign-off first.
 - New public-API changes should update `README.md` and `library.json`/`library.properties`; new features should include an example sketch.
+
+## Release process (fork betas: `trifecta-betaN`)
+
+Betas are tagged on the active dev branch (currently `espnow-ip-bridge`), pushed to the `fork` remote (`smellyspice/MeshCore`), and published as GitHub pre-releases with built binaries attached.
+
+**Tagging gotcha that has bitten before:** `git tag <name>` with no explicit ref tags whatever `HEAD` happens to be for the *current checkout* — if the working directory isn't actually on the intended branch (e.g. it silently ended up on `main`/`fork/main`, which is a stale, rarely-updated pointer), the tag silently lands on the wrong, often much older, commit. The push and release creation both succeed either way, so nothing errors — the mistake is invisible unless checked for.
+
+Before tagging a release, always verify explicitly:
+1. `git branch --show-current` — confirm it's the intended dev branch, not `main`.
+2. `git rev-parse HEAD` and `git log -1 --format='%H %cI %s' HEAD` — confirm the commit and its message match what the release notes describe.
+3. Create the tag against that resolved SHA explicitly (`git tag <name> <sha>`), not a bare `git tag <name>`.
+4. After tagging, `git log -1 <tag>` — confirm it shows the same commit as step 2 before pushing.
+
+After publishing, verify the release actually landed correctly — don't trust a successful `gh release create` exit code alone:
+- `gh release view <tag> --json tagName,isDraft,isPrerelease,publishedAt,assets` — confirm not a draft, has the expected asset count.
+- `gh api repos/<owner>/<repo>/releases | jq '.[0].tag_name'` (or check the releases page) — confirm the new release actually sorts first. GitHub sorts the releases list by the **tagged commit's date**, not by upload/publish time — a tag on an old commit gets buried out of view on the releases page even though the release itself is live, published, and fully intact. This is exactly how `trifecta-beta14` went missing the first time: tagged on stale `fork/main` (a commit from weeks earlier), so it silently sorted to the bottom of the list instead of erroring.
