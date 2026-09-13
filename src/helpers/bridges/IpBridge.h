@@ -186,6 +186,18 @@ private:
   bool _server_listening = false;  // instance-wide: is the listen socket bound and up
   PeerSlot _peers[MAX_IP_PEERS];
 
+#ifdef BRIDGE_DEBUG
+  // R42 multi-peer CLI-responsiveness investigation (see
+  // planning/firmware-env-consolidation.md) -- temporary, debug-build-only
+  // per-tick timing so we can see where the cost actually goes as connected
+  // peer count rises. Not meant to outlive that investigation.
+  uint32_t _prof_peer_us[MAX_IP_PEERS] = {0};
+  uint32_t _prof_peer_calls[MAX_IP_PEERS] = {0};
+  uint32_t _prof_loop_us_max = 0;
+  uint32_t _prof_window_start_at = 0;
+  void profileTick(uint32_t loop_us);
+#endif
+
   // BridgeBase's inherited _seen_packets is shared between RX and TX; a
   // packet needing to cross in one direction could be silently dropped
   // because identical content already crossed the other way. Separate TX

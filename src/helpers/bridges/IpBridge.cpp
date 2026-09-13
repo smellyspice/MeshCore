@@ -247,8 +247,10 @@ bool IpBridge::setupSslContext(mbedtls_ssl_context *ssl, mbedtls_net_context *fd
   mbedtls_net_set_nonblock(fd);
   mbedtls_ssl_free(ssl);
   mbedtls_ssl_init(ssl);
-  if (mbedtls_ssl_setup(ssl, &_ssl_conf) != 0) {
-    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_setup failed\n");
+  int setup_ret = mbedtls_ssl_setup(ssl, &_ssl_conf);
+  if (setup_ret != 0) {
+    BRIDGE_DEBUG_PRINTLN("mbedtls_ssl_setup failed, ret=-0x%04x, free_heap=%u\n",
+                         (unsigned)(-setup_ret), (unsigned)ESP.getFreeHeap());
     return false;
   }
   mbedtls_ssl_set_bio(ssl, fd, mbedtls_net_send, mbedtls_net_recv, NULL);
@@ -383,8 +385,32 @@ void IpBridge::formatStatus(char *reply) const {
       return;
     }
 
+    // Caller's buffer is a fixed 'char reply[160]' (see examples/*/main.cpp),
+    // and this is invoked as formatIpStatus(&reply[2]) -- 158 bytes usable.
+    // With MAX_IP_PEERS=4, four fully-populated peer segments alone can run
+    // past 260 bytes, so every segment below is length-checked against what
+    // actually remains rather than appended unconditionally -- this used to
+    // be unbounded sprintf() and overflowed the caller's stack buffer with
+    // as few as 3 connected peers (stack-smashing crash/reboot, previously
+    // mistaken for the multi-peer CLI-responsiveness issue itself -- see
+    // planning/firmware-env-consolidation.md).
+    const size_t budget = 158;
     char *dp = reply;
-    dp += sprintf(dp, "listening on port %u", (unsigned)_prefs->ip_port);
+    size_t used = 0;
+    char segment[80];
+
+#define APPEND_SEGMENT() do { \
+      size_t seg_len = strlen(segment); \
+      if (used + seg_len + 1 > budget) { \
+        if (used + 6 <= budget) strcpy(dp + used, "; ..."); \
+        used = strlen(reply); \
+        goto format_status_done; \
+      } \
+      strcpy(dp + used, segment); \
+      used += seg_len; \
+    } while (0)
+
+    used = (size_t)snprintf(reply, budget, "listening on port %u", (unsigned)_prefs->ip_port);
 
     int connected_count = 0;
     for (int i = 0; i < MAX_IP_PEERS; i++) {
@@ -394,20 +420,28 @@ void IpBridge::formatStatus(char *reply) const {
       formatPeerIp(peer.client_ip, peer.client_ip_len, peer_ip);
       unsigned long since_rx_secs = peer.last_rx_at == 0 ? 0 : (millis() - peer.last_rx_at) / 1000;
       if (peer.state == State::HANDSHAKING) {
-        dp += sprintf(dp, "; peer %s attempting handshake...", peer_ip);
+        snprintf(segment, sizeof(segment), "; peer %s attempting handshake...", peer_ip);
       } else if (peer.state == State::CONNECTED) {
         const char *id = peer.identity[0] != 0 ? peer.identity : "?";
         if (peer.last_rx_at == 0) {
-          dp += sprintf(dp, "; peer %s [%s] connected, nothing received yet", peer_ip, id);
+          snprintf(segment, sizeof(segment), "; peer %s [%s] connected, nothing received yet", peer_ip, id);
         } else {
-          dp += sprintf(dp, "; peer %s [%s] connected, last heard %lus ago", peer_ip, id, since_rx_secs);
+          snprintf(segment, sizeof(segment), "; peer %s [%s] connected, last heard %lus ago", peer_ip, id, since_rx_secs);
         }
+      } else {
+        continue;
       }
+      APPEND_SEGMENT();
     }
     if (connected_count == 0) {
-      dp += sprintf(dp, ", no peers yet");
+      snprintf(segment, sizeof(segment), ", no peers yet");
+      APPEND_SEGMENT();
     }
-    sprintf(dp, "%s", challenger_note);
+    snprintf(segment, sizeof(segment), "%s", challenger_note);
+    APPEND_SEGMENT();
+format_status_done:
+    dp[used] = 0;
+#undef APPEND_SEGMENT
   } else {  // client, always _peers[0]
     const PeerSlot &peer = _peers[0];
     unsigned long since_rx_secs = peer.last_rx_at == 0 ? 0 : (millis() - peer.last_rx_at) / 1000;
@@ -1008,8 +1042,41 @@ void IpBridge::onPacketReceived(mesh::Packet *packet) {
   handleReceivedPacket(packet);
 }
 
+#ifdef BRIDGE_DEBUG
+// R42 multi-peer investigation only -- see IpBridge.h. Prints a per-peer
+// average/max tick cost every ~5s, then resets the window. Deliberately not
+// printed every tick: Serial.printf() itself costs real time on this same
+// core, and printing on every loop() would swamp the very thing being
+// measured.
+void IpBridge::profileTick(uint32_t loop_us) {
+  if (loop_us > _prof_loop_us_max) _prof_loop_us_max = loop_us;
+
+  uint32_t now = millis();
+  if (_prof_window_start_at == 0) _prof_window_start_at = now;
+  if ((int32_t)(now - _prof_window_start_at) < 5000) return;
+
+  BRIDGE_DEBUG_PRINTLN("PROFILE loop_us_max=%u window_ms=%u free_heap=%u\n",
+                        (unsigned)_prof_loop_us_max, (unsigned)(now - _prof_window_start_at),
+                        (unsigned)ESP.getFreeHeap());
+  for (int i = 0; i < MAX_IP_PEERS; i++) {
+    if (_prof_peer_calls[i] == 0) continue;
+    BRIDGE_DEBUG_PRINTLN("PROFILE peer[%d] state=%d calls=%u avg_us=%u\n",
+                          i, (int)_peers[i].state, (unsigned)_prof_peer_calls[i],
+                          (unsigned)(_prof_peer_us[i] / _prof_peer_calls[i]));
+    _prof_peer_us[i] = 0;
+    _prof_peer_calls[i] = 0;
+  }
+  _prof_loop_us_max = 0;
+  _prof_window_start_at = now;
+}
+#endif
+
 void IpBridge::loop() {
   if (!_initialized) return;
+
+#ifdef BRIDGE_DEBUG
+  uint32_t _prof_loop_start = micros();
+#endif
 
   // Server: always check for a new incoming connection, regardless of any
   // slot's current state -- the listening socket stays live the whole time
@@ -1037,9 +1104,17 @@ void IpBridge::loop() {
           peer.next_handshake_poll_at = millis() + IP_BRIDGE_HANDSHAKE_POLL_INTERVAL_MS;
         }
         break;
-      case State::CONNECTED:
+      case State::CONNECTED: {
+#ifdef BRIDGE_DEBUG
+        uint32_t _prof_peer_start = micros();
         pollConnectedIO(peer);
+        _prof_peer_us[i] += micros() - _prof_peer_start;
+        _prof_peer_calls[i]++;
+#else
+        pollConnectedIO(peer);
+#endif
         break;
+      }
       case State::RECONNECT_WAIT:
         if ((int32_t)(millis() - peer.next_action_at) >= 0) startConnect();  // client (_peers[0]) only
         break;
@@ -1047,6 +1122,10 @@ void IpBridge::loop() {
         break;
     }
   }
+
+#ifdef BRIDGE_DEBUG
+  profileTick(micros() - _prof_loop_start);
+#endif
 }
 
 #endif
