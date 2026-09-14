@@ -155,7 +155,6 @@
 <span class="k">set</span> ip.peer.remove &lt;id&gt;</pre>
     <p>The id is the first 4 bytes of the connecting peer's public key (its <code>get public.key</code>, or shown in <code>ip.status</code> once connected). Matching is case&#8209;insensitive. Each connecting peer still presents its own identity via its own <code>ip.secret</code> on its side — this only changes how the listener resolves and authenticates them.</p>
     <p>A peer registered here doesn't have to be another repeater — a <a href="sidecar-setup.html">direct-IP companion</a> connects the same way, presenting its own identity and secret exactly like any other peer.</p>
-    <div class="note"><strong>Known limitation:</strong> CLI/admin responsiveness on the listening repeater has been observed to degrade with more than about 2 concurrent IP peers connected, well short of the compiled max of 4. Until this is further optimized, keep IP-peer count on any one repeater to 2 or fewer.</div>
   </div>
 
   <div class="section-head"><div class="num">2</div><h2>Verify it's actually working</h2></div>
