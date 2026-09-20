@@ -11,8 +11,27 @@
 #if defined(ESP32) && defined(IP_BRIDGE_RADIO)
   #include <WiFi.h>
   #include <esp_wifi.h>
+  #include <time.h>
+  #include <esp_sntp.h>
+  #include "NtpConfig.h"
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
+  // No battery-backed RTC on these boards, so rtc_clock resets to a bogus
+  // default every boot until NTP corrects it -- re-applied periodically (see
+  // NTP_RESYNC_INTERVAL_MS below) to bound long-run drift, not just once at
+  // boot/reconnect. Same pattern as simple_repeater/main.cpp's NTP bring-up;
+  // scoped to IP_BRIDGE_RADIO only -- ESP-NOW-bridged room servers already
+  // get their clock from the host's periodic ESP-NOW time beacon
+  // (ESPNowBridgeRadio.cpp's handleTimeBeacon()), and companion boards get
+  // theirs pushed by the phone app, so neither needs this.
+  bool ntp_synced = false;
+  unsigned long last_ntp_sync_at = 0;
+  #ifndef NTP_RESYNC_INTERVAL_MS
+  #define NTP_RESYNC_INTERVAL_MS (12UL * 60 * 60 * 1000)  // 12h -- drift is slow, no need to be aggressive
+  #endif
+  #ifndef FIRMWARE_BUILD_EPOCH
+  #define FIRMWARE_BUILD_EPOCH 1700000000UL  // ~Nov 2023, only if build.sh wasn't used
+  #endif
 #endif
 
 #ifdef ETHERNET_ENABLED
@@ -114,6 +133,7 @@ void setup() {
             wifi_needs_reconnect = true;
         } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
             wifi_needs_reconnect = false;
+            configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);   // UTC, matches rtc_clock's epoch semantics
         }
     });
 
@@ -191,6 +211,31 @@ void loop() {
     WiFi.disconnect();
     WiFi.reconnect();
     last_wifi_reconnect_attempt = millis();
+    ntp_synced = false;   // re-apply once the reconnect's SNTP query lands
+  }
+  if (!ntp_synced) {
+    // sntp_get_sync_status() only reports COMPLETED once a real SNTP reply
+    // has actually been processed -- unlike checking the epoch value alone,
+    // this can't be fooled by the boot-time fallback clock, which sets a
+    // hardcoded date that already looks "plausible" despite never having
+    // talked to a real time server.
+    if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+      time_t now = time(NULL);
+      if (now > (time_t)FIRMWARE_BUILD_EPOCH) {   // sanity floor even on a genuine SNTP reply
+        rtc_clock.setCurrentTime((uint32_t)now);
+        ntp_synced = true;
+        last_ntp_sync_at = millis();
+        MESH_DEBUG_PRINTLN("Clock synced via NTP: %u", (uint32_t)now);
+      }
+    }
+  } else if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0 &&
+             (millis() - last_ntp_sync_at > NTP_RESYNC_INTERVAL_MS)) {
+    // Same guard as the initial sync: only re-triggered when WiFi is
+    // actually configured. Periodic, not drift-critical -- see the field
+    // comment on ntp_synced above.
+    MESH_DEBUG_PRINTLN("Re-syncing clock via NTP...");
+    configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
+    ntp_synced = false;   // re-applied once this new SNTP query lands, same as above
   }
 #endif
 
