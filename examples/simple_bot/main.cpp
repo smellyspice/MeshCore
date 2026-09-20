@@ -61,6 +61,11 @@
 #define FLOOD_ADVERT_INTERVAL_MS   (24UL * 60 * 60 * 1000) // 24 hours
 #define FLOOD_ADVERT_JITTER_MS     (10UL * 60 * 1000)      // +/- 10 minutes
 
+// 3-byte path hashes on flood packets, matching every other EchoBoard fleet
+// member's 'path.hash.mode 2' (mode+1 = byte size -- see CommonCLI.cpp).
+// This example has no CommonCLI/path.hash.mode CLI setting, so it's fixed here.
+#define PATH_HASH_SIZE   3
+
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
 // Believe it or not, this std C function is busted on some platforms!
@@ -460,7 +465,7 @@ public:
   void sendSelfAdvert(int delay_millis) {
     auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
     if (pkt) {
-      sendFlood(pkt, delay_millis);
+      sendFlood(pkt, delay_millis, PATH_HASH_SIZE); // matches the fleet's path.hash.mode 2 convention
     }
   }
 
@@ -529,7 +534,7 @@ public:
       int len = strlen((char *) &temp[5]);
       auto pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, _public->channel, temp, 5 + len);
       if (pkt) {
-        sendFlood(pkt);
+        sendFlood(pkt, (uint32_t) 0, PATH_HASH_SIZE); // matches the fleet's path.hash.mode 2 convention
         Serial.println("   Sent.");
       } else {
         Serial.println("   ERROR: unable to send");
