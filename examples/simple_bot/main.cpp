@@ -72,6 +72,10 @@ struct NodePrefs {  // persisted to file
   float freq;
   int8_t tx_power_dbm;
   uint8_t unused[3];
+#ifdef ESPNOW_BRIDGE_RADIO
+  uint8_t bridge_channel;   // 0 = not configured yet -- radio stays inert, no compile-time default
+  char bridge_secret[16];   // empty = not configured yet -- radio stays inert, no compile-time default
+#endif
 };
 
 class MyMesh : public BaseChatMesh, ContactVisitor {
@@ -403,6 +407,15 @@ public:
 
     loadContacts();
     _public = addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
+
+#ifdef ESPNOW_BRIDGE_RADIO
+    // radio_driver.init() (called before prefs were loaded) left the radio inert --
+    // only start it once BOTH persisted prefs are actually set (same pattern as
+    // companion_radio/MyMesh.cpp).
+    if (_prefs.bridge_channel != 0 && _prefs.bridge_secret[0] != 0) {
+      radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+    }
+#endif
   }
 
   void savePrefs() {
@@ -563,6 +576,38 @@ public:
         _prefs.freq = atof(&config[5]);
         savePrefs();
         Serial.println("  OK - reboot to apply");
+#ifdef ESPNOW_BRIDGE_RADIO
+      } else if (memcmp(config, "bridge.channel ", 15) == 0) {
+        int ch = atoi(&config[15]);
+        if (ch > 0 && ch < 15) {
+          _prefs.bridge_channel = (uint8_t) ch;
+          savePrefs();
+          if (_prefs.bridge_secret[0] != 0) radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+          Serial.println("  OK");
+        } else {
+          Serial.println("  ERROR: channel must be between 1-14");
+        }
+      } else if (memcmp(config, "bridge.secret ", 14) == 0) {
+        StrHelper::strncpy(_prefs.bridge_secret, &config[14], sizeof(_prefs.bridge_secret));
+        savePrefs();
+        if (_prefs.bridge_channel != 0) radio_driver.setBridgeParams(_prefs.bridge_channel, _prefs.bridge_secret);
+        Serial.println("  OK");
+#endif
+      } else if (memcmp(config, "prv.key ", 8) == 0) {
+        uint8_t prv_key[PRV_KEY_SIZE];
+        bool success = mesh::Utils::fromHex(prv_key, PRV_KEY_SIZE, &config[8]);
+        if (success && mesh::LocalIdentity::validatePrivateKey(prv_key)) {
+          mesh::LocalIdentity new_id;
+          new_id.readFrom(prv_key, PRV_KEY_SIZE);
+          self_id = new_id;
+          IdentityStore store(*_fs, "/identity");
+          store.save("_main", self_id);
+          Serial.print("  OK, reboot to apply! New pubkey: ");
+          mesh::Utils::printHex(Serial, self_id.pub_key, PUB_KEY_SIZE);
+          Serial.println();
+        } else {
+          Serial.println("  ERROR: bad key");
+        }
       } else {
         Serial.printf("  ERROR: unknown config: %s\n", config);
       }
@@ -570,7 +615,7 @@ public:
       Serial.println(FIRMWARE_VER_TEXT);
     } else if (memcmp(command, "help", 4) == 0) {
       Serial.println("Commands:");
-      Serial.println("   set {name|lat|lon|freq|tx|af} {value}");
+      Serial.println("   set {name|lat|lon|freq|tx|af|prv.key|bridge.channel|bridge.secret} {value}");
       Serial.println("   card");
       Serial.println("   import {biz card}");
       Serial.println("   clock");
