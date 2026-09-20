@@ -81,6 +81,8 @@ To add a new firmware role or radio feature, the layering to understand is: `Dis
 
 Betas are tagged on the active dev branch (currently `espnow-ip-bridge`), pushed to the `fork` remote (`smellyspice/MeshCore`), and published as GitHub pre-releases with built binaries attached.
 
+**This section is a summary, not the full process.** Before cutting any release, read `planning/beta-release-process.md` in full — it has the mandatory pre-push PII/secrets check (real SSIDs/passwords, binary `strings` scan, commit/tag message scan) and the current release asset list, neither of which is repeated here.
+
 **Tagging gotcha that has bitten before:** `git tag <name>` with no explicit ref tags whatever `HEAD` happens to be for the *current checkout* — if the working directory isn't actually on the intended branch (e.g. it silently ended up on `main`/`fork/main`, which is a stale, rarely-updated pointer), the tag silently lands on the wrong, often much older, commit. The push and release creation both succeed either way, so nothing errors — the mistake is invisible unless checked for.
 
 Before tagging a release, always verify explicitly:
@@ -92,3 +94,15 @@ Before tagging a release, always verify explicitly:
 After publishing, verify the release actually landed correctly — don't trust a successful `gh release create` exit code alone:
 - `gh release view <tag> --json tagName,isDraft,isPrerelease,publishedAt,assets` — confirm not a draft, has the expected asset count.
 - `gh api repos/<owner>/<repo>/releases | jq '.[0].tag_name'` (or check the releases page) — confirm the new release actually sorts first. GitHub sorts the releases list by the **tagged commit's date**, not by upload/publish time — a tag on an old commit gets buried out of view on the releases page even though the release itself is live, published, and fully intact. This is exactly how `trifecta-beta14` went missing the first time: tagged on stale `fork/main` (a commit from weeks earlier), so it silently sorted to the bottom of the list instead of erroring.
+
+## Checking whether a feature already shipped
+
+**Before concluding a feature isn't implemented, check the real changelog — don't rely on a source grep alone.** Every `trifecta-betaN` tag's annotated message is a genuine per-release changelog entry describing exactly what shipped (e.g. `git tag -l 'trifecta-beta*' -n99`, or `git tag -l --format='%(contents)' trifecta-beta14` for one). All of beta3 through the current beta are ancestors of every active dev branch. The `promo` branch also has public-facing per-feature pages (`git show promo:trifecta.html`, `sidecar.html`, `echo-board.html`) describing shipped functionality in user terms.
+
+A source grep that finds nothing means the grep missed it (wrong keyword, feature lives behind a runtime flag, different naming) far more often than it means the feature is absent — this fork has shipped 16+ betas of exactly this kind of change. Check the tag messages before telling the user a feature doesn't exist.
+
+## Working conventions (standing rules, not per-task requests)
+
+Personal hardware-fleet config and working-style preferences live in `CLAUDE.local.md` (gitignored, not part of this public repo) — read it too.
+
+**Before changing anything in `src/`, `helpers/`, or another file shared across firmware roles:** enumerate every caller/consumer across `examples/*` (and any `variants/*` build flags that alter its behavior) before editing, not after. This codebase has repeatedly broken in a different role/layer than the one being changed — `region default` silently broke propagation through unconfigured repeaters, and switching `bridge.source` to `logRx` silently truncated DIRECT-route paths learned two layers away. A change that looks locally correct is not enough; state explicitly what else touches the changed function/state and what happens to each of those call sites before calling a change safe.

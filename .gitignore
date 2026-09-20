@@ -18,3 +18,5 @@ compile_commands.json
 venv/
 platformio.local.ini
 tools/__pycache__/
+CLAUDE.local.md
+planning/
