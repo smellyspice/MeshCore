@@ -785,10 +785,25 @@ bool MyMesh::onPeerPathRecv(mesh::Packet *packet, int sender_idx, const uint8_t 
   int i = matching_peer_indexes[sender_idx];
 
   if (i >= 0 && i < acl.getNumClients()) { // get from our known_clients table (sender SHOULD already be known in this context)
-    MESH_DEBUG_PRINTLN("PATH to client, path_len=%d", (uint32_t)path_len);
+    // path_len's top bits encode the hash size this PATH was built with -- see
+    // Mesh.cpp's PAYLOAD_TYPE_PATH decode, same encoding as Packet::getPathHashSize().
+    // A sender using a shorter hash size than this board's own path.hash.mode
+    // produces path entries that can collide across multiple real nodes (found live,
+    // 2026-09-20: a 1-byte path hash was ambiguous across this fleet's EB-prefixed
+    // vanity identities -- see [[ip-bridge-mesh-safety]] gap 7). Reject rather than
+    // cache a too-short path -- sendDirect() would otherwise keep reusing an
+    // ambiguous route for every future reply. Falls back to flood (OUT_PATH_UNKNOWN)
+    // until a correctly-sized PATH arrives, which is slower but unambiguous.
+    uint8_t hash_size = (path_len >> 6) + 1;
     auto client = acl.getClientByIdx(i);
-    client->out_path_len = mesh::Packet::copyPath(client->out_path, path, path_len); // store a copy of path, for sendDirect()
-    client->last_activity = getRTCClock()->getCurrentTime();
+    if (hash_size < _prefs.path_hash_mode + 1) {
+      MESH_DEBUG_PRINTLN("onPeerPathRecv: rejecting path, hash_size=%d < local path.hash.mode+1=%d",
+                          (uint32_t)hash_size, (uint32_t)(_prefs.path_hash_mode + 1));
+    } else {
+      MESH_DEBUG_PRINTLN("PATH to client, path_len=%d", (uint32_t)path_len);
+      client->out_path_len = mesh::Packet::copyPath(client->out_path, path, path_len); // store a copy of path, for sendDirect()
+    }
+    client->last_activity = getRTCClock()->getCurrentTime();  // heard from client either way
   } else {
     MESH_DEBUG_PRINTLN("onPeerPathRecv: invalid peer idx: %d", i);
   }
