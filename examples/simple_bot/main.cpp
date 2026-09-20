@@ -528,6 +528,9 @@ public:
       } else {
         Serial.println("   ERR: unable to send");
       }
+    } else if (strcmp(command, "advert flood") == 0) {
+      sendSelfAdvert(0);
+      Serial.println("   (advert sent, flood).");
     } else if (strcmp(command, "reset path") == 0) {
       if (curr_recipient) {
         resetPathTo(*curr_recipient);
@@ -625,6 +628,7 @@ public:
       Serial.println("   to");
       Serial.println("   send <text>");
       Serial.println("   advert");
+      Serial.println("   advert flood");
       Serial.println("   reset path");
       Serial.println("   public <text>");
     } else {
