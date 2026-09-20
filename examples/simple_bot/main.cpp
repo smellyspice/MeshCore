@@ -51,6 +51,16 @@
 #define DIRECT_SEND_PERHOP_FACTOR         6.0f
 #define DIRECT_SEND_PERHOP_EXTRA_MILLIS   250
 
+// Periodic re-advert, same convention as simple_repeater's default install
+// (see examples/simple_repeater/MyMesh.h/.cpp) -- zero-hop keeps the
+// immediate bridge/repeater's neighbor table fresh; flood keeps the wider
+// mesh's routing tables aware this node exists. Jitter avoids every board on
+// a shared power-cycle firing in lockstep.
+#define LOCAL_ADVERT_INTERVAL_MS   (60UL * 60 * 1000)      // 60 minutes
+#define LOCAL_ADVERT_JITTER_MS     (2UL * 60 * 1000)       // +/- 2 minutes
+#define FLOOD_ADVERT_INTERVAL_MS   (24UL * 60 * 60 * 1000) // 24 hours
+#define FLOOD_ADVERT_JITTER_MS     (10UL * 60 * 1000)      // +/- 10 minutes
+
 #define  PUBLIC_GROUP_PSK  "izOH6cXN6mrJ5e26oRXNcg=="
 
 // Believe it or not, this std C function is busted on some platforms!
@@ -88,6 +98,7 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
   char command[512+10];
   uint8_t tmp_buf[256];
   char hex_buf[512];
+  unsigned long next_local_advert, next_flood_advert;
 
   const char* getTypeName(uint8_t type) const {
     if (type == ADV_TYPE_CHAT) return "Chat";
@@ -209,6 +220,8 @@ protected:
   bool allowPacketForward(const mesh::Packet* packet) override {
     return true;
   }
+
+  bool shouldOverwriteWhenFull() const override { return true; }
 
   void onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path_len, const uint8_t* path) override {
     // TODO: if not in favs,  prompt to add as fav(?)
@@ -357,6 +370,7 @@ public:
 
     command[0] = 0;
     curr_recipient = NULL;
+    next_local_advert = next_flood_advert = 0;
   }
 
   float getFreqPref() const { return _prefs.freq; }
@@ -448,6 +462,32 @@ public:
     if (pkt) {
       sendFlood(pkt, delay_millis);
     }
+  }
+
+  void sendSelfAdvertZeroHop(uint32_t delay_millis) {
+    auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
+    if (pkt) {
+      sendZeroHop(pkt, delay_millis);
+    }
+  }
+
+  void scheduleInitialAdverts() {
+    // First zero-hop fires sooner than the steady-state 60-minute interval (so the
+    // immediate bridge/repeater learns about this node quickly after boot); every
+    // fire after this one goes through the normal updateAdvertTimer() 60-min cadence.
+    int32_t jitter_ms = (int32_t) random(-10000, 10001); // +/- 10 seconds
+    next_local_advert = futureMillis(120000 + jitter_ms); // ~2 minutes
+    updateFloodAdvertTimer(); // first flood advert at the normal ~24h cadence
+  }
+
+  void updateAdvertTimer() {
+    int32_t jitter_ms = (int32_t) random(-(int32_t) LOCAL_ADVERT_JITTER_MS, (int32_t) LOCAL_ADVERT_JITTER_MS + 1);
+    next_local_advert = futureMillis((int32_t) LOCAL_ADVERT_INTERVAL_MS + jitter_ms);
+  }
+
+  void updateFloodAdvertTimer() {
+    int32_t jitter_ms = (int32_t) random(-(int32_t) FLOOD_ADVERT_JITTER_MS, (int32_t) FLOOD_ADVERT_JITTER_MS + 1);
+    next_flood_advert = futureMillis((int32_t) FLOOD_ADVERT_INTERVAL_MS + jitter_ms);
   }
 
   // ContactVisitor
@@ -639,6 +679,15 @@ public:
   void loop() {
     BaseChatMesh::loop();
 
+    if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
+      sendSelfAdvert(0);
+      updateFloodAdvertTimer(); // schedule next flood advert
+      updateAdvertTimer();      // also reschedule local advert, so they don't overlap
+    } else if (next_local_advert && millisHasNowPassed(next_local_advert)) {
+      sendSelfAdvertZeroHop(0);
+      updateAdvertTimer(); // schedule next local advert
+    }
+
     int len = strlen(command);
     while (Serial.available() && len < sizeof(command)-1) {
       char c = Serial.read();
@@ -700,9 +749,11 @@ void setup() {
 
   the_mesh.showWelcome();
 
-  // send out initial Advertisement to the mesh
+  // Schedule periodic re-adverts: zero-hop every ~60 minutes (first one ~2 minutes
+  // after boot), flood every ~24 hours -- see scheduleInitialAdverts()/
+  // updateAdvertTimer()/updateFloodAdvertTimer() and their handling in loop().
 #if ENABLE_ADVERT_ON_BOOT == 1
-  the_mesh.sendSelfAdvert(1200);   // add slight delay
+  the_mesh.scheduleInitialAdverts();
 #endif
 }
 
