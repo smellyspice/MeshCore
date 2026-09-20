@@ -278,11 +278,18 @@ protected:
   }
 
   void buildRouteText(const ContactInfo& from, mesh::Packet* pkt, char* dest, size_t dest_len) {
+    // isRouteDirect() means "an explicit path was supplied", not "zero hops" --
+    // a DIRECT packet can carry a real multi-hop path. getPathHashCount() masks
+    // off just the hop-count bits (path_len also packs the hash size, e.g. 3
+    // bytes/hop under path.hash.mode 2, into its upper bits), so it's correct
+    // regardless of route type or hash size.
+    int hops = (int) pkt->getPathHashCount();
     if (pkt->isRouteDirect()) {
-      snprintf(dest, dest_len, "You reached me direct (0 hops).");
+      snprintf(dest, dest_len, "You reached me via a direct path, %d hop(s). Return path: %d hop(s).",
+        hops, (int) from.out_path_len);
     } else {
       snprintf(dest, dest_len, "You reached me via flood, %d hop(s). Return path: %d hop(s).",
-        (int) pkt->path_len, (int) from.out_path_len);
+        hops, (int) from.out_path_len);
     }
   }
 
