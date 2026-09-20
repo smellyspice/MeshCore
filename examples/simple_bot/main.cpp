@@ -238,6 +238,36 @@ protected:
     saveContacts();
   }
 
+  // BaseChatMesh's default onContactPathRecv() caches whatever hash size an
+  // incoming PATH carries with no check against this fleet's PATH_HASH_SIZE
+  // (3 bytes) -- a shorter hash is ambiguous across multiple real nodes and
+  // then gets reused (and persisted via onContactPathUpdated()'s
+  // saveContacts()) for every future reply, even across reboots. Same class
+  // of bug as simple_room_server's onPeerPathRecv(), fixed the same way:
+  // reject caching a too-short path instead of accepting it. Scoped to this
+  // file only -- BaseChatMesh itself is untouched, so companion_radio and
+  // simple_secure_chat are unaffected.
+  bool onContactPathRecv(ContactInfo& from, uint8_t* in_path, uint8_t in_path_len, uint8_t* out_path,
+                          uint8_t out_path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override {
+    uint8_t hash_size = (out_path_len >> 6) + 1;
+    if (hash_size < PATH_HASH_SIZE) {
+      Serial.printf("onContactPathRecv: rejecting path from %s, hash_size=%d < %d\n",
+                    from.name, (uint32_t) hash_size, (uint32_t) PATH_HASH_SIZE);
+      // Still process anything riding along with this PATH packet -- just
+      // don't cache the ambiguous route itself. NOTE: unlike the accepted
+      // path below, this can't clear a matching in-flight send's timeout
+      // (BaseChatMesh::txt_send_timeout is private to the base class) --
+      // an acceptable tradeoff for a packet we're already rejecting.
+      if (extra_type == PAYLOAD_TYPE_ACK && extra_len >= 4) {
+        processAck(extra);
+      } else if (extra_type == PAYLOAD_TYPE_RESPONSE && extra_len > 0) {
+        onContactResponse(from, extra, extra_len);
+      }
+      return true;  // still fine to send a reciprocal path back
+    }
+    return BaseChatMesh::onContactPathRecv(from, in_path, in_path_len, out_path, out_path_len, extra_type, extra, extra_len);
+  }
+
   void onContactPathUpdated(const ContactInfo& contact) override {
     Serial.printf("PATH to: %s, path_len=%d\n", contact.name, (uint32_t) contact.out_path_len);
     saveContacts();
