@@ -29,6 +29,12 @@
   #ifndef WIFI_TX_POWER
   #define WIFI_TX_POWER 20
   #endif
+  // Modem sleep default (see ESPNOWRadio.cpp) -- overridable per-board via
+  // build_flags (-D WIFI_POWER_SAVE_MODE=WIFI_PS_MIN_MODEM) for boards that
+  // need battery life over RX latency.
+  #ifndef WIFI_POWER_SAVE_MODE
+  #define WIFI_POWER_SAVE_MODE WIFI_PS_NONE
+  #endif
 
   bool wifi_needs_reconnect = false;
   unsigned long last_wifi_reconnect_attempt = 0;
@@ -157,7 +163,7 @@ void setup() {
   // harmless/idempotent to call again here. On a real-LoRa board there is no
   // ESP-NOW init to do it implicitly, so this is the only thing that does.
   WiFi.mode(WIFI_STA);
-  esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
+  esp_wifi_set_ps(WIFI_POWER_SAVE_MODE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
   esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 #endif
 

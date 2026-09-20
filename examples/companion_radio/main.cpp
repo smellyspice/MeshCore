@@ -48,6 +48,12 @@ MultiSerialInterface interface_manager;
     #ifndef WIFI_TX_POWER
     #define WIFI_TX_POWER 20
     #endif
+    // Modem sleep default (see ESPNOWRadio.cpp) -- overridable per-board via
+    // build_flags (-D WIFI_POWER_SAVE_MODE=WIFI_PS_MIN_MODEM) for boards that
+    // need battery life over RX latency.
+    #ifndef WIFI_POWER_SAVE_MODE
+    #define WIFI_POWER_SAVE_MODE WIFI_PS_NONE
+    #endif
   #else
     #error "SerialWifiInterface is not defined for this platform"
   #endif
@@ -226,7 +232,7 @@ void setup() {
   // second WiFi.begin()).
   board.setInhibitSleep(true);   // prevent sleep when WiFi is active
   WiFi.setAutoReconnect(true);
-  esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
+  esp_wifi_set_ps(WIFI_POWER_SAVE_MODE);   // modem sleep adds latency/jitter to WiFi/ESP-NOW RX
   esp_wifi_set_max_tx_power(WIFI_TX_POWER * 4);
 
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
@@ -260,7 +266,10 @@ void setup() {
   if (the_mesh.getNodePrefs()->wifi_ssid[0] != 0) {
     board.setInhibitSleep(true);   // prevent sleep when WiFi is active
     WiFi.setAutoReconnect(true);
-    esp_wifi_set_ps(WIFI_PS_NONE);   // modem sleep adds latency/jitter, same reasoning as WIFI_SSID path
+    #ifndef WIFI_POWER_SAVE_MODE
+    #define WIFI_POWER_SAVE_MODE WIFI_PS_NONE
+    #endif
+    esp_wifi_set_ps(WIFI_POWER_SAVE_MODE);   // modem sleep adds latency/jitter, same reasoning as WIFI_SSID path
     #ifndef WIFI_TX_POWER
     #define WIFI_TX_POWER 20
     #endif

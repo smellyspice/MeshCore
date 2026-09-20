@@ -10,6 +10,13 @@
 #define WIFI_TX_POWER 20
 #endif
 
+// Modem sleep default -- overridable per-board via build_flags
+// (-D WIFI_POWER_SAVE_MODE=WIFI_PS_MIN_MODEM) for boards that need battery
+// life over RX latency.
+#ifndef WIFI_POWER_SAVE_MODE
+#define WIFI_POWER_SAVE_MODE WIFI_PS_NONE
+#endif
+
 // Framing must match src/helpers/bridges/ESPNowBridge.cpp (BridgeBase::BRIDGE_PACKET_MAGIC/
 // BRIDGE_TIME_MAGIC) bit-for-bit, so this radio is wire-compatible with an unmodified
 // repeater's bridge.
@@ -289,7 +296,7 @@ void ESPNowBridgeRadio::init() {
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
   // Modem sleep adds latency/jitter to every RX window -- off for ESP-NOW.
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_ps(WIFI_POWER_SAVE_MODE);
 
   // NOTE: deliberately NOT enabling WIFI_PROTOCOL_LR here (unlike plain
   // ESPNOWRadio.cpp). ESPNowBridge on the repeater side never enables Long

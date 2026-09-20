@@ -12,6 +12,13 @@
 #define WIFI_TX_POWER 20
 #endif
 
+// Modem sleep default -- overridable per-board via build_flags
+// (-D WIFI_POWER_SAVE_MODE=WIFI_PS_MIN_MODEM) for boards that need battery
+// life over RX latency.
+#ifndef WIFI_POWER_SAVE_MODE
+#define WIFI_POWER_SAVE_MODE WIFI_PS_NONE
+#endif
+
 static uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static esp_now_peer_info_t peerInfo;
 static volatile bool is_send_complete = false;
@@ -35,7 +42,7 @@ void ESPNOWRadio::init() {
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
   // Modem sleep adds latency/jitter to every RX window -- off for ESP-NOW.
-  esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_ps(WIFI_POWER_SAVE_MODE);
   // Long Range mode
   esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_LR);
 
