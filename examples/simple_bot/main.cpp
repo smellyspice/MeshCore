@@ -61,6 +61,14 @@
 #define FLOOD_ADVERT_INTERVAL_MS   (24UL * 60 * 60 * 1000) // 24 hours
 #define FLOOD_ADVERT_JITTER_MS     (10UL * 60 * 1000)      // +/- 10 minutes
 
+// Contacts are persisted on a timer rather than on every event: re-hearing a
+// known contact's advert changes only timestamps, and rewriting the whole file
+// for that on every passing advert is pure flash wear. Cost of the delay is up
+// to this much contact learning lost to a power cut (re-learned on the sender's
+// next advert), and slightly staler persisted advert timestamps (the replay
+// guard -- see onAdvertRecv() in BaseChatMesh).
+#define CONTACTS_FLUSH_INTERVAL_MS   (5UL * 60 * 1000)   // 5 minutes
+
 // 3-byte path hashes on flood packets, matching every other EchoBoard fleet
 // member's 'path.hash.mode 2' (mode+1 = byte size -- see CommonCLI.cpp).
 // This example has no CommonCLI/path.hash.mode CLI setting, so it's fixed here.
@@ -104,6 +112,9 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
   uint8_t tmp_buf[256];
   char hex_buf[512];
   unsigned long next_local_advert, next_flood_advert;
+  bool contacts_dirty;
+  unsigned long next_contacts_flush;
+  uint32_t contacts_sig;   // of the last successful write, see calcContactsSig()
 
   const char* getTypeName(uint8_t type) const {
     if (type == ADV_TYPE_CHAT) return "Chat";
@@ -140,12 +151,74 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
 
           if (!success) break;  // EOF
 
+          // Existing entries bypass shouldAutoAddContactType() when their
+          // advert is re-heard, so a file written before that filter existed
+          // would keep its repeaters forever. Drop them on load instead.
+          if (c.type != ADV_TYPE_CHAT) continue;
+
           c.id = mesh::Identity(pub_key);
           c.lastmod = 0;
+          if (!hasUsablePath(c)) {   // repair anything an older build persisted
+            c.out_path_len = OUT_PATH_UNKNOWN;
+            memset(c.out_path, 0, sizeof(c.out_path));
+          }
           if (!addContact(c)) full = true;
         }
         file.close();
       }
+    }
+  }
+
+  // A path hash shorter than PATH_HASH_SIZE is ambiguous across nodes sharing
+  // a prefix; onContactPathRecv() below refuses to cache one, but an older
+  // build's /contacts file may hold one. Drop the path, never the contact: a
+  // DM carries only a 1-byte sender hash, so a contact we forget can never
+  // reach us again, while a dropped route re-learns itself on next exchange.
+  static bool hasUsablePath(const ContactInfo& c) {
+    if (c.out_path_len == OUT_PATH_UNKNOWN) return false;
+    uint8_t hash_size = (c.out_path_len >> 6) + 1;
+    return hash_size >= PATH_HASH_SIZE;
+  }
+
+  static void sigMix(uint32_t& sig, const void* data, size_t len) {
+    const uint8_t* p = (const uint8_t *) data;
+    while (len--) { sig ^= *p++; sig *= 16777619u; }   // FNV-1a
+  }
+
+  // Fingerprint of everything worth a flash write: identity, name, type, flags
+  // and usable route. Deliberately excludes the advert/lastmod timestamps --
+  // those tick on every re-heard advert, and persisting that churn is exactly
+  // what this is here to avoid.
+  uint32_t calcContactsSig() {
+    ContactsIterator iter = startContactsIterator();
+    ContactInfo c;
+    uint32_t sig = 2166136261u;
+    while (iter.hasNext(this, c)) {
+      uint8_t out_path_len = hasUsablePath(c) ? c.out_path_len : OUT_PATH_UNKNOWN;
+      sigMix(sig, c.id.pub_key, PUB_KEY_SIZE);
+      sigMix(sig, c.name, sizeof(c.name));
+      sigMix(sig, &c.type, 1);
+      sigMix(sig, &c.flags, 1);
+      sigMix(sig, &out_path_len, 1);
+      if (out_path_len != OUT_PATH_UNKNOWN) sigMix(sig, c.out_path, MAX_PATH_SIZE);
+    }
+    return sig;
+  }
+
+  void markContactsDirty() {
+    if (!contacts_dirty) {
+      contacts_dirty = true;
+      next_contacts_flush = futureMillis(CONTACTS_FLUSH_INTERVAL_MS);
+    }
+  }
+
+  void flushContactsIfDue() {
+    if (!contacts_dirty || !millisHasNowPassed(next_contacts_flush)) return;
+
+    if (calcContactsSig() == contacts_sig) {
+      contacts_dirty = false;   // only timestamps moved -- not worth a write
+    } else {
+      saveContacts();
     }
   }
 
@@ -165,19 +238,30 @@ class MyMesh : public BaseChatMesh, ContactVisitor {
       uint32_t reserved = 0;
 
       while (iter.hasNext(this, c)) {
+        uint8_t out_path_len = c.out_path_len;
+        uint8_t out_path[MAX_PATH_SIZE];
+        memcpy(out_path, c.out_path, MAX_PATH_SIZE);
+        if (!hasUsablePath(c)) {   // keep the contact, forget the unusable route
+          out_path_len = OUT_PATH_UNKNOWN;
+          memset(out_path, 0, sizeof(out_path));
+        }
+
         bool success = (file.write(c.id.pub_key, 32) == 32);
         success = success && (file.write((uint8_t *) &c.name, 32) == 32);
         success = success && (file.write(&c.type, 1) == 1);
         success = success && (file.write(&c.flags, 1) == 1);
         success = success && (file.write(&unused, 1) == 1);
         success = success && (file.write((uint8_t *) &reserved, 4) == 4);
-        success = success && (file.write((uint8_t *) &c.out_path_len, 1) == 1);
+        success = success && (file.write(&out_path_len, 1) == 1);
         success = success && (file.write((uint8_t *) &c.last_advert_timestamp, 4) == 4);
-        success = success && (file.write(c.out_path, 64) == 64);
+        success = success && (file.write(out_path, MAX_PATH_SIZE) == MAX_PATH_SIZE);
 
         if (!success) break;  // write failed
       }
       file.close();
+
+      contacts_sig = calcContactsSig();
+      contacts_dirty = false;
     }
   }
 
@@ -228,6 +312,30 @@ protected:
 
   bool shouldOverwriteWhenFull() const override { return true; }
 
+  // Every flood the chat layer emits (message replies, reciprocal path returns,
+  // ACKs sent before a route is known) funnels through these two, and the base
+  // versions take the core default of 1-byte path hashes -- the hardcoded
+  // PATH_HASH_SIZE above only ever reached this node's own adverts. That default
+  // is what broke route learning: the bot flooded a reply tagged with 1-byte
+  // hops, the far end learned a 1-byte route from it and handed a 1-byte route
+  // back, and onContactPathRecv() below then rejected it as too short -- so no
+  // route was ever cached and every reply flooded, forever. Send at the fleet's
+  // size so the routes we teach are ones we'd accept ourselves.
+  void sendFloodScoped(const ContactInfo& recipient, mesh::Packet* pkt, uint32_t delay_millis=0) override {
+    sendFlood(pkt, delay_millis, PATH_HASH_SIZE);
+  }
+  void sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pkt, uint32_t delay_millis=0) override {
+    sendFlood(pkt, delay_millis, PATH_HASH_SIZE);
+  }
+
+  // Contact slots are this bot's reachability budget, not an address book.
+  // Repeaters/rooms are never messaged from here and routing never consults
+  // the contact list, so auto-adding them just evicts real companions (which
+  // are then unreachable, permanently) once the table is full.
+  bool shouldAutoAddContactType(uint8_t type) const override {
+    return type == ADV_TYPE_CHAT;
+  }
+
   void onDiscoveredContact(ContactInfo& contact, bool is_new, uint8_t path_len, const uint8_t* path) override {
     // TODO: if not in favs,  prompt to add as fav(?)
 
@@ -235,7 +343,12 @@ protected:
     Serial.printf("  type: %s\n", getTypeName(contact.type));
     Serial.print("   public key: "); mesh::Utils::printHex(Serial, contact.id.pub_key, PUB_KEY_SIZE); Serial.println();
 
-    saveContacts();
+    // Fires for every advert heard, including declined/no-slot ones passed in
+    // on a temporary -- nothing to persist there, and rewriting the whole
+    // contacts file per passing advert is pure flash wear.
+    if (lookupContactByPubKey(contact.id.pub_key, PUB_KEY_SIZE) != NULL) {
+      markContactsDirty();
+    }
   }
 
   // BaseChatMesh's default onContactPathRecv() caches whatever hash size an
@@ -270,7 +383,7 @@ protected:
 
   void onContactPathUpdated(const ContactInfo& contact) override {
     Serial.printf("PATH to: %s, path_len=%d\n", contact.name, (uint32_t) contact.out_path_len);
-    saveContacts();
+    markContactsDirty();
   }
 
   ContactInfo* processAck(const uint8_t *data) override {
@@ -307,19 +420,43 @@ protected:
       _prefs.node_name);
   }
 
+  // Renders a repeater chain as "3 hops: a1b1c1, d2e2f2, 9a8b7c". Hex only --
+  // naming them would need a repeater table this bot deliberately doesn't keep.
+  // `reverse` walks the array back-to-front -- see buildRouteText below for why.
+  void formatPath(char* dest, size_t dest_len, const uint8_t* path, uint8_t hops, uint8_t hash_size, bool reverse) {
+    int w = snprintf(dest, dest_len, "%d hop%s", (int) hops, hops == 1 ? "" : "s");
+    if (w < 0 || (size_t) w >= dest_len) return;   // truncated
+
+    size_t n = (size_t) w;
+    for (uint8_t i = 0; i < hops; i++) {
+      uint8_t idx = reverse ? (hops - 1 - i) : i;
+      char hex[MAX_PATH_SIZE * 2 + 1];
+      mesh::Utils::toHex(hex, &path[(size_t) idx * hash_size], hash_size);
+      w = snprintf(&dest[n], dest_len - n, "%s%s", i == 0 ? ": " : ", ", hex);
+      if (w < 0 || (size_t) w >= dest_len - n) return;   // truncated, stop cleanly
+      n += (size_t) w;
+    }
+  }
+
   void buildRouteText(const ContactInfo& from, mesh::Packet* pkt, char* dest, size_t dest_len) {
-    // isRouteDirect() means "an explicit path was supplied", not "zero hops" --
-    // a DIRECT packet can carry a real multi-hop path. getPathHashCount() masks
-    // off just the hop-count bits (path_len also packs the hash size, e.g. 3
-    // bytes/hop under path.hash.mode 2, into its upper bits), so it's correct
-    // regardless of route type or hash size.
-    int hops = (int) pkt->getPathHashCount();
-    if (pkt->isRouteDirect()) {
-      snprintf(dest, dest_len, "You reached me via a direct path, %d hop(s). Return path: %d hop(s).",
-        hops, (int) from.out_path_len);
+    // Always reported sender-to-bot, i.e. the order a message actually travels
+    // to reach here, regardless of which of the two sources below supplied it.
+    //
+    // A FLOOD packet carries its real inbound path, appended in that same
+    // sender-to-bot order as each relay forwards it -- used as-is.
+    //
+    // A DIRECT one carries no path (each relay strips its own hash as it
+    // forwards), so the cached out_path is used instead. That path is the
+    // bot's own OUTBOUND route -- learned by echoing back, unreversed, the
+    // path a flood from the bot arrived with at the contact's end, which by
+    // construction is in bot-to-sender order. Reverse it here so both cases
+    // read the same way.
+    if (pkt->isRouteFlood()) {
+      formatPath(dest, dest_len, pkt->path, pkt->getPathHashCount(), pkt->getPathHashSize(), false);
+    } else if (from.out_path_len != OUT_PATH_UNKNOWN) {
+      formatPath(dest, dest_len, from.out_path, from.out_path_len & 63, (from.out_path_len >> 6) + 1, true);
     } else {
-      snprintf(dest, dest_len, "You reached me via flood, %d hop(s). Return path: %d hop(s).",
-        hops, (int) from.out_path_len);
+      StrHelper::strncpy(dest, "No route to you known yet.", dest_len);
     }
   }
 
@@ -347,7 +484,7 @@ protected:
       buildHelpText(reply, sizeof(reply));
       if (first_contact) {
         contact->flags |= CONTACT_FLAG_GREETED;
-        saveContacts();
+        markContactsDirty();
       }
     } else if (strcmp(cmd, "ping") == 0) {
       strcpy(reply, "pong");
@@ -413,6 +550,9 @@ public:
     command[0] = 0;
     curr_recipient = NULL;
     next_local_advert = next_flood_advert = 0;
+    contacts_dirty = false;
+    next_contacts_flush = 0;
+    contacts_sig = 0;
   }
 
   float getFreqPref() const { return _prefs.freq; }
@@ -462,6 +602,7 @@ public:
     }
 
     loadContacts();
+    contacts_sig = calcContactsSig();   // matches what's on disk -- no write until something real changes
     _public = addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure Andy's public channel
 
 #ifdef ESPNOW_BRIDGE_RADIO
@@ -619,6 +760,10 @@ public:
         saveContacts();
         Serial.println("   Done.");
       }
+    } else if (strcmp(command, "erase contacts") == 0) {
+      _fs->remove("/contacts");
+      curr_recipient = NULL;
+      Serial.println("   OK - reboot to apply (in-memory list stays until then)");
     } else if (memcmp(command, "card", 4) == 0) {
       Serial.printf("Hello %s\n", _prefs.node_name);
       auto pkt = createSelfAdvert(_prefs.node_name, _prefs.node_lat, _prefs.node_lon);
@@ -712,6 +857,7 @@ public:
       Serial.println("   advert");
       Serial.println("   advert flood");
       Serial.println("   reset path");
+      Serial.println("   erase contacts");
       Serial.println("   public <text>");
     } else {
       Serial.print("   ERROR: unknown command: "); Serial.println(command);
@@ -720,6 +866,8 @@ public:
 
   void loop() {
     BaseChatMesh::loop();
+
+    flushContactsIfDue();
 
     if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
       sendSelfAdvert(0);
